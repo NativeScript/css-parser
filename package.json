@@ -22,12 +22,12 @@
   "devDependencies": {
     "@types/chai": "*",
     "@types/mocha": "*",
+    "@types/node": "^8.0.47",
     "chai": "*",
     "mocha": "*",
     "mocha-typescript": "*",
     "nyc": "*",
     "source-map-support": "*",
-    "ts-node": "^3.3.0",
     "typescript": "*"
   },
   "nyc": {
