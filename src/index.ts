@@ -17,8 +17,8 @@ export interface QualifiedRule {
 
 const whitespaceRegEx = /[\s\t\n\r\f]*/gym;
 
-const singleQuoteStringRegEx = /'((?:[^\n\r\f\']|\\(?:\$|\n|[0-9a-fA-F]{1,6}\s?))*)(:?'|$)/gym; // Besides $n, parse escape 
-const doubleQuoteStringRegEx = /"((?:[^\n\r\f\"]|\\(?:\$|\n|[0-9a-fA-F]{1,6}\s?))*)(:?"|$)/gym; // Besides $n, parse escape 
+const singleQuoteStringRegEx = /'((?:[^\n\r\f\\']|\\(?:\$|\n|[0-9a-fA-F]{1,6}\s?|'))*)(?:'|$)/gym; // Besides $n, parse escape 
+const doubleQuoteStringRegEx = /"((?:[^\n\r\f\\"]|\\(?:\$|\n|[0-9a-fA-F]{1,6}\s?|"))*)(?:"|$)/gym; // Besides $n, parse escape 
 const commentRegEx = /(\/\*(?:[^\*]|\*[^\/])*\*\/)/gym;
 const numberRegEx = /[\+\-]?(?:\d+\.\d+|\d+|\.\d+)(?:[eE][\+\-]?\d+)?/gym;
 const nameRegEx = /-?(?:(?:[a-zA-Z_]|[^\x00-\x7F]|\\(?:\$|\n|[0-9a-fA-F]{1,6}\s?))(?:[a-zA-Z_0-9\-]*|\\(?:\$|\n|[0-9a-fA-F]{1,6}\s?))*)/gym;
@@ -80,6 +80,13 @@ export const enum TokenType {
      * This is a complete consumed function: <function-token>([<component-value> [, <component-value>]*])")"
      */
     function = "<function>",
+
+
+    /**
+     * Unicode range token.
+     * U+AB00?? or U+FFAA-FFFF like range of unicode tokens.
+     */
+    unicodeRangeToken = "<unicode-range-token>"
 }
 
 interface InputTokenObject {
@@ -88,16 +95,16 @@ interface InputTokenObject {
 }
 
 /**
- * This is a "<ident>(" token.
+ * This is an "<ident>(" token.
  */
 interface FunctionInputToken extends InputTokenObject {
-    name: string;
 }
 
 /**
  * This is a completely parsed function like "<ident>([component [, component]*])".
  */
 interface FunctionToken extends FunctionInputToken {
+    name: string;
     components: any[];
 }
 
@@ -108,6 +115,18 @@ interface SimpleBlock extends InputTokenObject {
 
 interface AtKeywordToken extends InputTokenObject {}
 
+interface UnicodeRangeToken extends InputTokenObject {
+    type: TokenType.unicodeRangeToken;
+    start: number;
+    end: number;
+}
+
+function isHex(char: string): boolean {
+    return (char >= '0' && char <= '9') ||
+        (char >= 'a' && char <= 'f') ||
+        (char >= 'A' && char <= 'F');
+}
+
 /**
  * CSS parser following relatively close:
  * CSS Syntax Module Level 3
@@ -117,14 +136,22 @@ export class CSS3Parser {
     private nextInputCodePointIndex = 0;
     private reconsumedInputToken: InputToken;
     private topLevelFlag: boolean;
+    private text: string;
 
-    constructor(private text: string) {}
+    private reset(text: string) {
+        this.text = text;
+        this.nextInputCodePointIndex = 0;
+        this.reconsumedInputToken = null;
+        this.topLevelFlag = false;
+    }
 
     /**
      * For testing purposes.
      * This method allows us to run and assert the proper working of the tokenizer.
      */
-    tokenize(): InputToken[] {
+    tokenize(text: string): InputToken[] {
+        this.reset(text);
+
         let tokens: InputToken[] = [];
         let inputToken: InputToken;
         while(inputToken = this.consumeAToken()) {
@@ -167,7 +194,13 @@ export class CSS3Parser {
                 return this.consumeAWhitespace();
             case "@": return this.consumeAtKeyword() || this.consumeADelimToken();
             // TODO: Only if this is valid escape, otherwise it is a parse error
-            case "\\": return this.consumeAnIdentLikeToken() || this.consumeADelimToken();
+            case "\\":
+                if (this.text[this.nextInputCodePointIndex + 1] === "\n") {
+                    // TODO: Log parse error
+                    this.nextInputCodePointIndex++;
+                    return { type: TokenType.delim, text: "\\" };
+                }
+                return this.consumeAnIdentLikeToken();
             case "0":
             case "1":
             case "2":
@@ -183,9 +216,9 @@ export class CSS3Parser {
             case "U":
                 if (this.text[this.nextInputCodePointIndex + 1] === "+") {
                     const thirdChar = this.text[this.nextInputCodePointIndex + 2];
-                    if (thirdChar >= '0' && thirdChar <= '9' || thirdChar === "?") {
-                        // TODO: Handle unicode stuff such as U+002B
-                        throw new Error("Unicode tokens not supported!");
+                    if (isHex(thirdChar) || thirdChar === "?") {
+                        this.nextInputCodePointIndex += 2;
+                        return this.consumeAUnicodeRangeToken();
                     }
                 }
                 return this.consumeAnIdentLikeToken() || this.consumeADelimToken();
@@ -221,7 +254,7 @@ export class CSS3Parser {
         this.nextInputCodePointIndex++;
         let hashName = this.consumeAName();
         if (hashName) {
-            return { type: TokenType.hash, text: "#" + hashName.text };
+            return { type: TokenType.hash, text: hashName.text };
         }
         this.nextInputCodePointIndex--;
         return null;
@@ -264,7 +297,8 @@ export class CSS3Parser {
         }
         this.nextInputCodePointIndex = numberRegEx.lastIndex;
         if (this.text[this.nextInputCodePointIndex] === "%") {
-            return { type: TokenType.percentage, text: result[0] }; // TODO: Push the actual number and unit here...
+            this.nextInputCodePointIndex++;
+            return { type: TokenType.percentage, text: result[0] };
         }
 
         const name = this.consumeAName();
@@ -289,7 +323,7 @@ export class CSS3Parser {
             if (name.text.toLowerCase() === "url") {
                 return this.consumeAURLToken();
             }
-            return <FunctionInputToken>{ type: TokenType.functionToken, name: name.text, text: name.text + "(" };
+            return <FunctionInputToken>{ type: TokenType.functionToken, text: name.text };
         }
         return name;
     }
@@ -301,6 +335,8 @@ export class CSS3Parser {
     private consumeAStringToken(): InputTokenObject {
         const char = this.text[this.nextInputCodePointIndex];
         let result: RegExpExecArray;
+
+        // TODO: Handle bad-string.
         if (char === "'") {
             singleQuoteStringRegEx.lastIndex = this.nextInputCodePointIndex;
             result = singleQuoteStringRegEx.exec(this.text);
@@ -316,10 +352,8 @@ export class CSS3Parser {
             }
             this.nextInputCodePointIndex = doubleQuoteStringRegEx.lastIndex;
         }
-
-        // TODO: Handle bad-string.
-        // TODO: Perform string escaping.
-        return { type: TokenType.string, text: result[0] };
+        const text = CSS3Parser.escape(result[1]);
+        return { type: TokenType.string, text };
     }
 
     /**
@@ -384,6 +418,43 @@ export class CSS3Parser {
     }
 
     /**
+     * 4.3.6. Consume a unicode-range token
+     * https://www.w3.org/TR/css-syntax-3/#consume-a-unicode-range-token
+     */
+    private consumeAUnicodeRangeToken(): UnicodeRangeToken {
+        let hexStart = this.nextInputCodePointIndex;
+        while(this.nextInputCodePointIndex - hexStart < 6 && isHex(this.text[this.nextInputCodePointIndex])) {
+            this.nextInputCodePointIndex++;
+        }
+        let hexEnd = this.nextInputCodePointIndex;
+        while(this.nextInputCodePointIndex - hexStart < 6 && this.text[this.nextInputCodePointIndex] === "?") {
+            this.nextInputCodePointIndex++;
+        }
+        let wildcardEnd = this.nextInputCodePointIndex;
+        if (wildcardEnd != hexEnd) {
+            // There were question tokens
+            const str = this.text.substring(hexStart, wildcardEnd);
+            let start = parseInt("0x" + str.replace(/\?/g, "0"), 16);
+            let end = parseInt("0x" + str.replace(/\?/g, "0"), 16);
+            return { type: TokenType.unicodeRangeToken, start, end, text: undefined };
+        }
+        const startStr = this.text.substring(hexStart, wildcardEnd);
+        const start = parseInt("0x" + startStr, 16);
+        if (this.text[this.nextInputCodePointIndex] === "-" && isHex(this.text[this.nextInputCodePointIndex + 1])) {
+            this.nextInputCodePointIndex++;
+            hexStart = this.nextInputCodePointIndex;
+            while(this.nextInputCodePointIndex - hexStart < 6 && isHex(this.text[this.nextInputCodePointIndex])) {
+                this.nextInputCodePointIndex++;
+            }
+            hexEnd = this.nextInputCodePointIndex;
+            const endStr = this.text.substr(hexStart, hexEnd);
+            const end = parseInt("0x" + endStr, 16);
+            return { type: TokenType.unicodeRangeToken, start, end, text: undefined };
+        }
+        return { type: TokenType.unicodeRangeToken, start, end: start, text: undefined };    
+    }
+
+    /**
      * 4.3.11. Consume a name
      * https://www.w3.org/TR/css-syntax-3/#consume-a-name
      */
@@ -394,8 +465,8 @@ export class CSS3Parser {
             return null;
         }
         this.nextInputCodePointIndex = nameRegEx.lastIndex;
-        // TODO: Perform string escaping.
-        return { type: TokenType.ident, text: result[0] };
+        const text = CSS3Parser.escape(result[0]);
+        return { type: TokenType.ident, text };
     }
 
     private consumeAtKeyword(): InputTokenObject {
@@ -556,7 +627,7 @@ export class CSS3Parser {
                 return this.consumeASimpleBlock(inputToken);
         }
         if (typeof inputToken === "object" && inputToken.type === TokenType.functionToken) {
-            return this.consumeAFunction((<FunctionInputToken>inputToken).name);
+            return this.consumeAFunction((<FunctionInputToken>inputToken).text);
         }
         return inputToken;
     }
@@ -622,6 +693,18 @@ export class CSS3Parser {
                     // TODO: Else we won't advance
             }
         } while(true);
+    }
+
+    private static escape(text: string): string {
+        return text.replace(/\\[a-fA-F0-9]{1,6}\s?/g, s => {
+                const code = "0x" + s.substr(1);
+                const char = String.fromCharCode(parseInt(code, 16))
+                return char;
+            })
+            .replace(/\\./g, s => {
+                if (s[1] === "\n") return "";
+                return s[1];
+            });
     }
 }
 

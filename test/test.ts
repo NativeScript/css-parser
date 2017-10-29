@@ -6,9 +6,15 @@ import { assert } from "chai";
 
 describe("css", () => {
     describe("tokenize", () => {
+        let parser: CSS3Parser;
+        before("create parser", () => {
+            parser = new CSS3Parser();
+        });
+        after("dispose parser", () => {
+            parser = null;
+        });
         it("Button { background: red; }", () => {
-            const parser = new CSS3Parser("Button { background: red; }");
-            const tokens = parser.tokenize();
+            const tokens = parser.tokenize("Button { background: red; }");
             assert.deepEqual(tokens, [
                 { type: TokenType.ident, text: "Button" },
                 " ", "{", " ",
@@ -19,8 +25,7 @@ describe("css", () => {
             ]);
         });
         it("@import url(~/app.css); Button { color: orange; }", () => {
-            const parser = new CSS3Parser("@import url(~/app.css); Button { color: orange; }");
-            const tokens = parser.tokenize();
+            const tokens = parser.tokenize("@import url(~/app.css); Button { color: orange; }");
             assert.deepEqual(tokens, [
                 { type: TokenType.atKeyword, text: "import" },
                 " ",
@@ -34,13 +39,38 @@ describe("css", () => {
                 ";", " ", "}"
             ]);
         });
+        it("some", () => {
+            const css = `Button {
+                background: rgba(255, 0, 0, 1);
+                width: 25%;
+            }`;
+            const tokens = parser.tokenize(css);
+            assert.deepEqual(tokens, [
+                { type: TokenType.ident, text: "Button" },
+                " ", "{", " ",
+                { type: TokenType.ident, text: "background" },
+                ":", " ",
+                { type: TokenType.functionToken, text: "rgba" },
+                { type: TokenType.number, text: "255" },
+                ",", " ",
+                { type: TokenType.number, text: "0" },
+                ",", " ",
+                { type: TokenType.number, text: "0" },
+                ",", " ",
+                { type: TokenType.number, text: "1" },
+                ")", ";", " ",
+                { type: TokenType.ident, text: "width" },
+                ":", " ",
+                { type: TokenType.percentage, text: "25" },
+                ";", " ", "}"
+            ]);
+        });
         it("@keyframes", () => {
             const css = `@keyframes mymove {
                 from { top: 0px; }
                 to { top: 200px; }
             }`;
-            const parser = new CSS3Parser(css);
-            const tokens = parser.tokenize();
+            const tokens = parser.tokenize(css);
             assert.deepEqual(tokens, [
                 { type: TokenType.atKeyword, text: "keyframes" },
                 " ",
@@ -58,6 +88,74 @@ describe("css", () => {
                 ":", " ",
                 { type: TokenType.dimension, text: "200px" },
                 ";", " ", "}", " ", "}"
+            ]);
+        });
+        it("linear-gradient(rgba(...", () => {
+            const css = `Button {
+                background: linear-gradient(-90deg, rgba(255, 0, 0, 0), blue, #FFFF00, #00F);
+            }`;
+            const tokens = parser.tokenize(css);
+            assert.deepEqual(tokens, [
+                { type: TokenType.ident, text: "Button" },
+                " ", "{", " ",
+                { type: TokenType.ident, text: "background" },
+                ":", " ",
+                { type: TokenType.functionToken, text: "linear-gradient" },
+                { type: TokenType.dimension, text: "-90deg" },
+                ",", " ",
+                { type: TokenType.functionToken, text: "rgba" },
+                { type: TokenType.number, text: "255" },
+                ",", " ",
+                { type: TokenType.number, text: "0" },
+                ",", " ",
+                { type: TokenType.number, text: "0" },
+                ",", " ",
+                { type: TokenType.number, text: "0" },
+                ")", ",", " ",
+                { type: TokenType.ident, text: "blue" },
+                ",", " ",
+                { type: TokenType.hash, text: "FFFF00" },
+                ",", " ",
+                { type: TokenType.delim, text: "#" },
+                { type: TokenType.dimension, text: "00F" },
+                ")", ";", " ", "}"
+            ]);
+        });
+        it("string tokens", () => {
+            const css = `Button {
+                font: "\\54 ah'o\\"ma";
+                font: "Taho\
+ma";
+                font: 'Tahoma"';
+            }`;
+            const tokens = parser.tokenize(css);
+            assert.deepEqual(tokens, [
+                { type: TokenType.ident, text: "Button" },
+                " ", "{", " ",
+                { type: TokenType.ident, text: "font" },
+                ":", " ",
+                { type: TokenType.string, text: "Tah'o\"ma" },
+                ";", " ",
+                { type: TokenType.ident, text: "font" },
+                ":", " ",
+                { type: TokenType.string, text: "Tahoma" },
+                ";", " ",
+                { type: TokenType.ident, text: "font" },
+                ":", " ",
+                { type: TokenType.string, text: "Tahoma\"" },
+                ";", " ", "}"
+            ]);
+        });
+        it("escaped ident", () => {
+            const css = `\\42utton { color: red; }`;
+            const tokens = parser.tokenize(css);
+            assert.deepEqual(tokens, [
+                { type: TokenType.ident, text: "Button" },
+                " ", "{", " ",
+                { type: TokenType.ident, text: "color" },
+                ":", " ",
+                { type: TokenType.ident, text: "red" },
+                ";", " ", "}"
             ]);
         });
     });
