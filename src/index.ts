@@ -23,7 +23,7 @@ const commentRegEx = /(\/\*(?:[^\*]|\*[^\/])*\*\/)/gym;
 const numberRegEx = /[\+\-]?(?:\d+\.\d+|\d+|\.\d+)(?:[eE][\+\-]?\d+)?/gym;
 const nameRegEx = /-?(?:(?:[a-zA-Z_]|[^\x00-\x7F]|\\(?:\$|\n|[0-9a-fA-F]{1,6}\s?))(?:[a-zA-Z_0-9\-]*|\\(?:\$|\n|[0-9a-fA-F]{1,6}\s?))*)/gym;
 const nonQuoteURLRegEx = /(:?[^\)\s\t\n\r\f\'\"\(]|\\(?:\$|\n|[0-9a-fA-F]{1,6}\s?))*/gym; // TODO: non-printable code points omitted
-type InputToken = "(" | ")" | "{" | "}" | "[" | "]" | ":" | ";" | "," | " " | "^=" | "|=" | "$=" | "*=" | "~=" | "<!--" | "-->" | undefined /* <EOF-token> */ | InputTokenObject | FunctionInputToken | FunctionToken | SimpleBlock | AtKeywordToken | UnicodeRangeToken;
+type InputToken = "(" | ")" | "{" | "}" | "[" | "]" | ":" | ";" | "," | " " | "^=" | "|=" | "$=" | "*=" | "~=" | "<!--" | "-->" | undefined /* <EOF-token> */ | InputTokenObject | FunctionInputToken | FunctionToken | SimpleBlock | AtKeywordToken | UnicodeRangeToken | AtKeywordToken;
 
 export const enum TokenType {
     /**
@@ -119,6 +119,10 @@ interface UnicodeRangeToken {
     end: number;
 }
 
+interface AtKeywordToken extends InputTokenObject {
+    type: TokenType.atKeyword;
+}
+
 function isHex(char: string): boolean {
     return (char >= '0' && char <= '9') ||
         (char >= 'a' && char <= 'f') ||
@@ -126,28 +130,21 @@ function isHex(char: string): boolean {
 }
 
 /**
- * CSS parser following relatively close:
- * CSS Syntax Module Level 3
- * https://www.w3.org/TR/css-syntax-3/
+ * 4. Tokenization
+ * https://www.w3.org/TR/css-syntax-3/#tokenization
  */
-export class CSS3Parser {
-    private nextInputCodePointIndex = 0;
-    private reconsumedInputToken: InputToken;
-    private topLevelFlag: boolean;
-    private text: string;
+export class CSS3Tokenizer {
 
-    private reset(text: string) {
-        this.text = text;
-        this.nextInputCodePointIndex = 0;
-        this.reconsumedInputToken = null;
-        this.topLevelFlag = false;
-    }
+    protected topLevelFlag: boolean;
+
+    private nextInputCodePointIndex = 0;
+    private text: string;
 
     /**
      * For testing purposes.
      * This method allows us to run and assert the proper working of the tokenizer.
      */
-    tokenize(text: string): InputToken[] {
+    public tokenize(text: string): InputToken[] {
         this.reset(text);
 
         let tokens: InputToken[] = [];
@@ -159,15 +156,19 @@ export class CSS3Parser {
     }
 
     /**
+     * Cleans up the parser state and prepares to parse the provided text.
+     */
+    protected reset(text: string) {
+        this.text = text;
+        this.nextInputCodePointIndex = 0;
+        this.topLevelFlag = false;
+    }
+
+    /**
      * 4.3.1. Consume a token
      * https://www.w3.org/TR/css-syntax-3/#consume-a-token
      */
-    private consumeAToken(): InputToken {
-        if (this.reconsumedInputToken) {
-            let result = this.reconsumedInputToken;
-            this.reconsumedInputToken = null;
-            return result;
-        }
+    protected consumeAToken(): InputToken {
         const char = this.text[this.nextInputCodePointIndex];
         switch(char) {
             case "\"": return this.consumeAStringToken();
@@ -485,208 +486,6 @@ export class CSS3Parser {
         return null;
     }
 
-    private reconsumeTheCurrentInputToken(currentInputToken: InputToken) {
-        this.reconsumedInputToken = currentInputToken;
-    }
-
-    /**
-     * 5.3.1. Parse a stylesheet
-     * https://www.w3.org/TR/css-syntax-3/#parse-a-stylesheet
-     */
-    public parseAStylesheet(): Stylesheet {
-        this.topLevelFlag = true;
-        const stylesheet: Stylesheet = {
-            rules: this.consumeAListOfRules()
-        };
-        return stylesheet;
-    }
-
-    /**
-     * 5.4.1. Consume a list of rules
-     * https://www.w3.org/TR/css-syntax-3/#consume-a-list-of-rules
-     */
-    public consumeAListOfRules(): Rule[] {
-        const rules: Rule[] = [];
-        let inputToken: InputToken;
-        while(inputToken = this.consumeAToken()) {
-            switch(inputToken) {
-                case " ": continue;
-                case "<!--":
-                case "-->":
-                    if (this.topLevelFlag) {
-                        continue;
-                    }
-                    this.reconsumeTheCurrentInputToken(inputToken);
-                    const atRule = this.consumeAnAtRule();
-                    if (atRule) {
-                        rules.push(atRule);
-                    }
-                    continue;
-            }
-            if ((<InputTokenObject>inputToken).type === TokenType.atKeyword) {
-                this.reconsumeTheCurrentInputToken(inputToken);
-                const atRule = this.consumeAnAtRule();
-                if (atRule) {
-                    rules.push(atRule);
-                }
-                continue;
-            }
-            this.reconsumeTheCurrentInputToken(inputToken);
-            const qualifiedRule = this.consumeAQualifiedRule();
-            if (qualifiedRule) {
-                rules.push(qualifiedRule);
-            }
-        }
-        return rules;
-    }
-
-    /**
-     * 5.4.2. Consume an at-rule
-     * https://www.w3.org/TR/css-syntax-3/#consume-an-at-rule
-     */
-    public consumeAnAtRule(): AtRule {
-        let inputToken = this.consumeAToken();
-        const atRule: AtRule = {
-            type: "at-rule",
-            name: (<AtKeywordToken>inputToken).text,
-            prelude: [],
-            block: undefined
-        }
-        while(inputToken = this.consumeAToken()) {
-            if (inputToken === ";") {
-                return atRule;
-            } else if (inputToken === "{") {
-                atRule.block = this.consumeASimpleBlock(inputToken);
-                return atRule;
-            } else if ((<InputTokenObject>inputToken).type === TokenType.simpleBlock && (<SimpleBlock>inputToken).associatedToken === "{") {
-                atRule.block = <SimpleBlock>inputToken;
-                return atRule;
-            }
-            this.reconsumeTheCurrentInputToken(inputToken);
-            const component = this.consumeAComponentValue();
-            if (component) {
-                atRule.prelude.push(component);
-            }
-        }
-        return atRule;
-    }
-
-    /**
-     * 5.4.3. Consume a qualified rule
-     * https://www.w3.org/TR/css-syntax-3/#consume-a-qualified-rule
-     */
-    public consumeAQualifiedRule(): QualifiedRule {
-        const qualifiedRule: QualifiedRule = {
-            type: "qualified-rule",
-            prelude: [],
-            block: undefined
-        };
-        let inputToken: InputToken;
-        while(inputToken = this.consumeAToken()) {
-            if (inputToken === "{") {
-                let block = this.consumeASimpleBlock(inputToken);
-                qualifiedRule.block = block;
-                return qualifiedRule;
-            } else if ((<InputTokenObject>inputToken).type === TokenType.simpleBlock) {
-                const simpleBlock: SimpleBlock = <SimpleBlock>inputToken;
-                if (simpleBlock.associatedToken === "{") {
-                    qualifiedRule.block = simpleBlock;
-                    return qualifiedRule;
-                }
-            }
-            this.reconsumeTheCurrentInputToken(inputToken);
-            const componentValue = this.consumeAComponentValue();
-            if (componentValue) {
-                qualifiedRule.prelude.push(componentValue);
-            }
-        }
-        // TODO: This is a parse error, log parse errors!
-        return null;
-    }
-
-    /**
-     * 5.4.6. Consume a component value
-     * https://www.w3.org/TR/css-syntax-3/#consume-a-component-value
-     */
-    private consumeAComponentValue(): InputToken {
-        // const inputToken = this.consumeAToken();
-        const inputToken = this.consumeAToken();
-        switch(inputToken) {
-            case "{":
-            case "[":
-            case "(":
-                this.nextInputCodePointIndex++;
-                return this.consumeASimpleBlock(inputToken);
-        }
-        if (typeof inputToken === "object" && inputToken.type === TokenType.functionToken) {
-            return this.consumeAFunction((<FunctionInputToken>inputToken).text);
-        }
-        return inputToken;
-    }
-
-    /**
-     * 5.4.7. Consume a simple block
-     * https://www.w3.org/TR/css-syntax-3/#consume-a-simple-block
-     */
-    private consumeASimpleBlock(associatedToken: InputToken): SimpleBlock {
-        const endianToken: "]" | "}" | ")" = {
-            "[": "]",
-            "{": "}",
-            "(": ")"
-        }[<any>associatedToken];
-        const start = this.nextInputCodePointIndex - 1;
-        const block: SimpleBlock = {
-            type: TokenType.simpleBlock,
-            text: undefined,
-            associatedToken,
-            values: []
-        };
-        let nextInputToken;
-        while(nextInputToken = this.text[this.nextInputCodePointIndex]) {
-            if (nextInputToken === endianToken) {
-                this.nextInputCodePointIndex++;
-                const end = this.nextInputCodePointIndex;
-                block.text = this.text.substring(start, end);
-                return block;
-            }
-            const value = this.consumeAComponentValue();
-            if (value) {
-                block.values.push(value);
-            }
-        }
-        block.text = this.text.substring(start);
-        return block;
-    }
-
-    /**
-     * 5.4.8. Consume a function
-     * https://www.w3.org/TR/css-syntax-3/#consume-a-function
-     */
-    private consumeAFunction(name: string): InputToken {
-        const start = this.nextInputCodePointIndex;
-        const funcToken: FunctionToken = { type: TokenType.function, name, text: undefined, components: [] };
-        do {
-            if (this.nextInputCodePointIndex >= this.text.length) {
-                funcToken.text = name + "(" + this.text.substring(start);
-                return funcToken;
-            }
-            const nextInputToken = this.text[this.nextInputCodePointIndex];
-            switch(nextInputToken) {
-                case ")":
-                    this.nextInputCodePointIndex++;
-                    const end = this.nextInputCodePointIndex;
-                    funcToken.text = name + "(" + this.text.substring(start, end);
-                    return funcToken;
-                default:
-                    const component = this.consumeAComponentValue();
-                    if (component) {
-                        funcToken.components.push(component);
-                    }
-                    // TODO: Else we won't advance
-            }
-        } while(true);
-    }
-
     private static escape(text: string): string {
         return text.replace(/\\[a-fA-F0-9]{1,6}\s?/g, s => {
                 const code = "0x" + s.substr(1);
@@ -698,6 +497,201 @@ export class CSS3Parser {
                 return s[1];
             });
     }
+}
+
+/**
+ * 5. Parsing
+ * https://www.w3.org/TR/css-syntax-3/#parsing
+ */
+export class CSS3Parser extends CSS3Tokenizer {
+    // /**
+    //  * 5.3.1. Parse a stylesheet
+    //  * https://www.w3.org/TR/css-syntax-3/#parse-a-stylesheet
+    //  */
+    // public parseAStylesheet(): Stylesheet {
+    //     this.topLevelFlag = true;
+    //     const stylesheet: Stylesheet = {
+    //         rules: this.consumeAListOfRules()
+    //     };
+    //     return stylesheet;
+    // }
+
+    // /**
+    //  * 5.4.1. Consume a list of rules
+    //  * https://www.w3.org/TR/css-syntax-3/#consume-a-list-of-rules
+    //  */
+    // public consumeAListOfRules(): Rule[] {
+    //     const rules: Rule[] = [];
+    //     let inputToken: InputToken;
+    //     while(inputToken = this.consumeAToken()) {
+    //         switch(inputToken) {
+    //             case " ": continue;
+    //             case "<!--":
+    //             case "-->":
+    //                 if (this.topLevelFlag) {
+    //                     continue;
+    //                 }
+    //                 const atRule = this.consumeAQualifiedRule(inputToken);
+    //                 if (atRule) {
+    //                     rules.push(atRule);
+    //                 }
+    //                 continue;
+    //         }
+    //         if ((<InputTokenObject>inputToken).type === TokenType.atKeyword) {
+    //             // TODO: Better typechecking...
+    //             const atRule = this.consumeAnAtRule(<AtKeywordToken>inputToken);
+    //             if (atRule) {
+    //                 rules.push(atRule);
+    //             }
+    //             continue;
+    //         }
+    //         const qualifiedRule = this.consumeAQualifiedRule(inputToken);
+    //         if (qualifiedRule) {
+    //             rules.push(qualifiedRule);
+    //         }
+    //     }
+    //     return rules;
+    // }
+
+    // /**
+    //  * 5.4.2. Consume an at-rule
+    //  * https://www.w3.org/TR/css-syntax-3/#consume-an-at-rule
+    //  */
+    // public consumeAnAtRule(reconsumedInputToken: AtKeywordToken): AtRule {
+    //     const atRule: AtRule = {
+    //         type: "at-rule",
+    //         name: reconsumedInputToken.text, // TODO: What if it is not an @whatever?
+    //         prelude: [],
+    //         block: undefined
+    //     }
+    //     let inputToken: InputToken;
+    //     while(inputToken = this.consumeAToken()) {
+    //         if (inputToken === ";") {
+    //             return atRule;
+    //         } else if (inputToken === "{") {
+    //             atRule.block = this.consumeASimpleBlock(inputToken);
+    //             return atRule;
+    //         } else if ((<InputTokenObject>inputToken).type === TokenType.simpleBlock && (<SimpleBlock>inputToken).associatedToken === "{") {
+    //             atRule.block = <SimpleBlock>inputToken;
+    //             return atRule;
+    //         }
+    //         const component = this.consumeAComponentValue(inputToken);
+    //         if (component) {
+    //             atRule.prelude.push(component);
+    //         }
+    //     }
+    //     return atRule;
+    // }
+
+    // /**
+    //  * 5.4.3. Consume a qualified rule
+    //  * https://www.w3.org/TR/css-syntax-3/#consume-a-qualified-rule
+    //  */
+    // public consumeAQualifiedRule(reconsumedInputToken: InputToken): QualifiedRule {
+    //     const qualifiedRule: QualifiedRule = {
+    //         type: "qualified-rule",
+    //         prelude: [],
+    //         block: undefined
+    //     };
+    //     let inputToken: InputToken = reconsumedInputToken;
+    //     do {
+    //         if (inputToken === "{") {
+    //             let block = this.consumeASimpleBlock(inputToken);
+    //             qualifiedRule.block = block;
+    //             return qualifiedRule;
+    //         } else if ((<InputTokenObject>inputToken).type === TokenType.simpleBlock) {
+    //             const simpleBlock: SimpleBlock = <SimpleBlock>inputToken;
+    //             if (simpleBlock.associatedToken === "{") {
+    //                 qualifiedRule.block = simpleBlock;
+    //                 return qualifiedRule;
+    //             }
+    //         }
+    //         const componentValue = this.consumeAComponentValue(inputToken);
+    //         if (componentValue) {
+    //             qualifiedRule.prelude.push(componentValue);
+    //         }
+    //     } while(inputToken = this.consumeAToken());
+    //     // TODO: This is a parse error, log parse errors!
+    //     return null;
+    // }
+
+    // /**
+    //  * 5.4.6. Consume a component value
+    //  * https://www.w3.org/TR/css-syntax-3/#consume-a-component-value
+    //  */
+    // private consumeAComponentValue(reconsumedInputToken: InputToken): InputToken {
+    //     switch(reconsumedInputToken) {
+    //         case "{":
+    //         case "[":
+    //         case "(":
+    //             return this.consumeASimpleBlock(reconsumedInputToken);
+    //     }
+    //     if (typeof reconsumedInputToken === "object" && reconsumedInputToken.type === TokenType.functionToken) {
+    //         return this.consumeAFunction((<FunctionInputToken>reconsumedInputToken).text);
+    //     }
+    //     return reconsumedInputToken;
+    // }
+
+    // /**
+    //  * 5.4.7. Consume a simple block
+    //  * https://www.w3.org/TR/css-syntax-3/#consume-a-simple-block
+    //  */
+    // private consumeASimpleBlock(associatedToken: InputToken): SimpleBlock {
+    //     const endianToken: "]" | "}" | ")" = {
+    //         "[": "]",
+    //         "{": "}",
+    //         "(": ")"
+    //     }[<any>associatedToken];
+    //     const block: SimpleBlock = {
+    //         type: TokenType.simpleBlock,
+    //         text: undefined,
+    //         associatedToken,
+    //         values: []
+    //     };
+    //     let nextInputToken;
+    //     while(nextInputToken = this.text[this.nextInputCodePointIndex]) {
+    //         if (nextInputToken === endianToken) {
+    //             this.nextInputCodePointIndex++;
+    //             const end = this.nextInputCodePointIndex;
+    //             block.text = this.text.substring(start, end);
+    //             return block;
+    //         }
+    //         const value = this.consumeAComponentValue();
+    //         if (value) {
+    //             block.values.push(value);
+    //         }
+    //     }
+    //     return block;
+    // }
+
+    // /**
+    //  * 5.4.8. Consume a function
+    //  * https://www.w3.org/TR/css-syntax-3/#consume-a-function
+    //  */
+    // private consumeAFunction(name: string): InputToken {
+    //     const start = this.nextInputCodePointIndex;
+    //     const funcToken: FunctionToken = { type: TokenType.function, name, text: undefined, components: [] };
+    //     do {
+    //         if (this.nextInputCodePointIndex >= this.text.length) {
+    //             funcToken.text = name + "(" + this.text.substring(start);
+    //             return funcToken;
+    //         }
+    //         const nextInputToken = this.text[this.nextInputCodePointIndex];
+    //         switch(nextInputToken) {
+    //             case ")":
+    //                 this.nextInputCodePointIndex++;
+    //                 const end = this.nextInputCodePointIndex;
+    //                 funcToken.text = name + "(" + this.text.substring(start, end);
+    //                 return funcToken;
+    //             default:
+    //                 const component = this.consumeAComponentValue();
+    //                 if (component) {
+    //                     funcToken.components.push(component);
+    //                 }
+    //                 // TODO: Else we won't advance
+    //         }
+    //     } while(true);
+    // }
 }
 
 // /**
