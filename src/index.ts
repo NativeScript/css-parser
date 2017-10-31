@@ -23,7 +23,7 @@ const commentRegEx = /(\/\*(?:[^\*]|\*[^\/])*\*\/)/gym;
 const numberRegEx = /[\+\-]?(?:\d+\.\d+|\d+|\.\d+)(?:[eE][\+\-]?\d+)?/gym;
 const nameRegEx = /-?(?:(?:[a-zA-Z_]|[^\x00-\x7F]|\\(?:\$|\n|[0-9a-fA-F]{1,6}\s?))(?:[a-zA-Z_0-9\-]*|\\(?:\$|\n|[0-9a-fA-F]{1,6}\s?))*)/gym;
 const nonQuoteURLRegEx = /(:?[^\)\s\t\n\r\f\'\"\(]|\\(?:\$|\n|[0-9a-fA-F]{1,6}\s?))*/gym; // TODO: non-printable code points omitted
-type InputToken = "(" | ")" | "{" | "}" | "[" | "]" | ":" | ";" | "," | " " | "^=" | "|=" | "$=" | "*=" | "~=" | "<!--" | "-->" | undefined /* <EOF-token> */ | InputTokenObject | FunctionInputToken | FunctionToken | SimpleBlock | AtKeywordToken;
+type InputToken = "(" | ")" | "{" | "}" | "[" | "]" | ":" | ";" | "," | " " | "^=" | "|=" | "$=" | "*=" | "~=" | "<!--" | "-->" | undefined /* <EOF-token> */ | InputTokenObject | FunctionInputToken | FunctionToken | SimpleBlock | AtKeywordToken | UnicodeRangeToken;
 
 export const enum TokenType {
     /**
@@ -86,7 +86,7 @@ export const enum TokenType {
      * Unicode range token.
      * U+AB00?? or U+FFAA-FFFF like range of unicode tokens.
      */
-    unicodeRangeToken = "<unicode-range-token>"
+    unicodeRange = "<unicode-range-token>"
 }
 
 interface InputTokenObject {
@@ -115,8 +115,8 @@ interface SimpleBlock extends InputTokenObject {
 
 interface AtKeywordToken extends InputTokenObject {}
 
-interface UnicodeRangeToken extends InputTokenObject {
-    type: TokenType.unicodeRangeToken;
+interface UnicodeRangeToken {
+    type: TokenType.unicodeRange;
     start: number;
     end: number;
 }
@@ -193,10 +193,9 @@ export class CSS3Parser {
             case "\f":
                 return this.consumeAWhitespace();
             case "@": return this.consumeAtKeyword() || this.consumeADelimToken();
-            // TODO: Only if this is valid escape, otherwise it is a parse error
             case "\\":
                 if (this.text[this.nextInputCodePointIndex + 1] === "\n") {
-                    // TODO: Log parse error
+                    // TODO: Log parse error.
                     this.nextInputCodePointIndex++;
                     return { type: TokenType.delim, text: "\\" };
                 }
@@ -435,8 +434,8 @@ export class CSS3Parser {
             // There were question tokens
             const str = this.text.substring(hexStart, wildcardEnd);
             let start = parseInt("0x" + str.replace(/\?/g, "0"), 16);
-            let end = parseInt("0x" + str.replace(/\?/g, "0"), 16);
-            return { type: TokenType.unicodeRangeToken, start, end, text: undefined };
+            let end = parseInt("0x" + str.replace(/\?/g, "F"), 16);
+            return { type: TokenType.unicodeRange, start, end };
         }
         const startStr = this.text.substring(hexStart, wildcardEnd);
         const start = parseInt("0x" + startStr, 16);
@@ -449,9 +448,9 @@ export class CSS3Parser {
             hexEnd = this.nextInputCodePointIndex;
             const endStr = this.text.substr(hexStart, hexEnd);
             const end = parseInt("0x" + endStr, 16);
-            return { type: TokenType.unicodeRangeToken, start, end, text: undefined };
+            return { type: TokenType.unicodeRange, start, end };
         }
-        return { type: TokenType.unicodeRangeToken, start, end: start, text: undefined };    
+        return { type: TokenType.unicodeRange, start, end: start };    
     }
 
     /**
@@ -708,112 +707,113 @@ export class CSS3Parser {
     }
 }
 
-/**
- * Consume a CSS3 parsed stylesheet and convert the rules and selectors to the
- * NativeScript internal JSON representation.
- */
-export class CSSNativeScript {
-    public parseStylesheet(stylesheet: Stylesheet): any {
-        return {
-            type: "stylesheet",
-            stylesheet: {
-                rules: this.parseRules(stylesheet.rules)
-            }
-        }
-    }
+// /**
+//  * Consume a CSS3 parsed stylesheet and convert the rules and selectors to the
+//  * NativeScript internal JSON representation.
+//  */
+// export class CSSNativeScript {
+//     public parseStylesheet(stylesheet: Stylesheet): any {
+//         return {
+//             type: "stylesheet",
+//             stylesheet: {
+//                 rules: this.parseRules(stylesheet.rules)
+//             }
+//         }
+//     }
 
-    private parseRules(rules: Rule[]): any {
-        return rules.map(rule => this.parseRule(rule));
-    }
+//     private parseRules(rules: Rule[]): any {
+//         return rules.map(rule => this.parseRule(rule));
+//     }
 
-    private parseRule(rule: Rule): any {
-        if (rule.type === "at-rule") {
-            return this.parseAtRule(rule);
-        } else if (rule.type === "qualified-rule") {
-            return this.parseQualifiedRule(rule);
-        }
-    }
+//     private parseRule(rule: Rule): any {
+//         if (rule.type === "at-rule") {
+//             return this.parseAtRule(rule);
+//         } else if (rule.type === "qualified-rule") {
+//             return this.parseQualifiedRule(rule);
+//         }
+//     }
 
-    private parseAtRule(rule: AtRule): any {
-        if (rule.name === "import") {
-            // TODO: We have used an "@improt { url('path somewhere'); }" at few places.
-            return {
-                import: rule.prelude.map(m => typeof m === "string" ? m : m.text).join("").trim(),
-                type: "import"
-            }
-        }
-        return;
-    }
+//     private parseAtRule(rule: AtRule): any {
+//         if (rule.name === "import") {
+//             // TODO: We have used an "@improt { url('path somewhere'); }" at few places.
+//             return {
+//                 import: rule.prelude.map(m => typeof m === "string" ? m : m.text).join("").trim(),
+//                 type: "import"
+//             }
+//         }
+//         return;
+//     }
 
-    private parseQualifiedRule(rule: QualifiedRule): any {
-        return {
-            type: "rule",
-            selectors: this.preludeToSelectorsStringArray(rule.prelude),
-            declarations: this.ruleBlockToDeclarations(rule.block.values)
-        }
-    }
+//     private parseQualifiedRule(rule: QualifiedRule): any {
+//         return {
+//             type: "rule",
+//             selectors: this.preludeToSelectorsStringArray(rule.prelude),
+//             declarations: this.ruleBlockToDeclarations(rule.block.values)
+//         }
+//     }
 
-    private ruleBlockToDeclarations(declarationsInputTokens: InputToken[]): { type: "declaration", property: string, value: string }[] {
-        // return <any>declarationsInputTokens;
-        const declarations: { type: "declaration", property: string, value: string }[] = [];
+//     private ruleBlockToDeclarations(declarationsInputTokens: InputToken[]): { type: "declaration", property: string, value: string }[] {
+//         // return <any>declarationsInputTokens;
+//         const declarations: { type: "declaration", property: string, value: string }[] = [];
 
-        let property = "";
-        let value = "";
-        let reading: "property" | "value" = "property";
+//         let property = "";
+//         let value = "";
+//         let reading: "property" | "value" = "property";
 
-        for (var i = 0; i < declarationsInputTokens.length; i++) {
-            let inputToken = declarationsInputTokens[i];
-            if (reading === "property") {
-                if (inputToken === ":") {
-                    reading = "value";
-                } else if (typeof inputToken === "string") {
-                    property += inputToken;
-                } else {
-                    property += inputToken.text;
-                }
-            } else {
-                if (inputToken === ";") {
-                    property = property.trim();
-                    value = value.trim();
-                    declarations.push({ type: "declaration", property, value });
-                    property = "";
-                    value = "";
-                    reading = "property";
-                } else if (typeof inputToken === "string") {
-                    value += inputToken;
-                } else {
-                    value += inputToken.text;
-                }
-            }
-        }
-        property = property.trim();
-        value = value.trim();
-        if (property || value) {
-            declarations.push({ type: "declaration", property, value });
-        }
-        return declarations;
-    }
+//         for (var i = 0; i < declarationsInputTokens.length; i++) {
+//             let inputToken = declarationsInputTokens[i];
+//             if (reading === "property") {
+//                 if (inputToken === ":") {
+//                     reading = "value";
+//                 } else if (typeof inputToken === "string") {
+//                     property += inputToken;
+//                 } else {
+//                     property += inputToken.text;
+//                 }
+//             } else {
+//                 if (inputToken === ";") {
+//                     property = property.trim();
+//                     value = value.trim();
+//                     declarations.push({ type: "declaration", property, value });
+//                     property = "";
+//                     value = "";
+//                     reading = "property";
+//                 } else if (typeof inputToken === "string") {
+//                     value += inputToken;
+//                 } else {
+//                     value += inputToken.text;
+//                 }
+//             }
+//         }
+//         property = property.trim();
+//         value = value.trim();
+//         if (property || value) {
+//             declarations.push({ type: "declaration", property, value });
+//         }
+//         return declarations;
+//     }
 
-    private preludeToSelectorsStringArray(prelude: InputToken[]): string[] {
-        let selectors = [];
-        let selector = "";
-        prelude.forEach(inputToken => {
-            if (typeof inputToken === "string") {
-                if (inputToken === ",") {
-                    if (selector) {
-                        selectors.push(selector.trim());
-                    }
-                    selector = "";
-                } else {
-                    selector += inputToken;
-                }
-            } else if (typeof inputToken === "object") {
-                selector += inputToken.text;
-            }
-        });
-        if (selector) {
-            selectors.push(selector.trim());
-        }
-        return selectors;
-    }
-}
+//     private preludeToSelectorsStringArray(prelude: InputToken[]): string[] {
+//         let selectors = [];
+//         let selector = "";
+//         // TODO:
+//         prelude.forEach(inputToken => {
+//             if (typeof inputToken === "string") {
+//                 if (inputToken === ",") {
+//                     if (selector) {
+//                         selectors.push(selector.trim());
+//                     }
+//                     selector = "";
+//                 } else {
+//                     selector += inputToken;
+//                 }
+//             } else if (typeof inputToken === "object") {
+//                 selector += inputToken.text;
+//             }
+//         });
+//         if (selector) {
+//             selectors.push(selector.trim());
+//         }
+//         return selectors;
+//     }
+// }

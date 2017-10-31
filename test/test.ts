@@ -158,5 +158,40 @@ ma";
                 ";", " ", "}"
             ]);
         });
+        it("unicode range", () => {
+            const css = `
+                unicode-range: U+26;               /* single codepoint */
+                unicode-range: U+0-7F;
+                unicode-range: U+0025-00FF;        /* codepoint range */
+                unicode-range: U+4??;              /* wildcard range */
+                unicode-range: U+0025-00FF, U+4??; /* multiple values */
+            `;
+            const tokens = parser.tokenize(css);
+            assert.deepEqual(tokens, [
+                " ",
+                { type: TokenType.ident, text: "unicode-range" },
+                ":", " ",
+                { type: TokenType.unicodeRange, start: 38, end: 38 },
+                ";", " ", " ",
+                { type: TokenType.ident, text: "unicode-range" },
+                ":", " ",
+                { type: TokenType.unicodeRange, start: 0, end: 127 },
+                ";", " ",
+                { type: TokenType.ident, text: "unicode-range" },
+                ":", " ",
+                { type: TokenType.unicodeRange, start: 37, end: 255 },
+                ";", " ", " ",
+                { type: TokenType.ident, text: "unicode-range" },
+                ":", " ",
+                { type: TokenType.unicodeRange, start: 1024, end: 1279 },
+                ";", " ", " ",
+                { type: TokenType.ident, text: "unicode-range" },
+                ":", " ",
+                { type: TokenType.unicodeRange, start: 37, end: 255 },
+                ",", " ",
+                { type: TokenType.unicodeRange, start: 1024, end: 1279 },
+                ";", " ", " "
+            ]);
+        })
     });
 });
