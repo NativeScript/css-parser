@@ -29,64 +29,62 @@ export const enum TokenType {
     /**
      * <string-token>
      */
-    string = "<string-token>",
+    string = 1,
     /**
      * <delim-token>
      */
-    delim = "<delim-token>",
+    delim = 2,
     /**
      * <number-token>
      */
-    number = "<number-token>",
+    number = 3,
     /**
      * <percentage-token>
      */
-    percentage = "<percentage-token>",
+    percentage = 4,
     /**
      * <dimension-token>
      */
-    dimension = "<dimension-token>",
+    dimension = 5,
     /**
      * <ident-token>
      */
-    ident = "<ident-token>",
+    ident = 6,
     /**
      * <url-token>
      */
-    url = "<url-token>",
+    url = 7,
     /**
      * <function-token>
      * This is a token indicating a function's leading: <ident-token>(
      */
-    functionToken = "<function-token>",
+    functionToken = 8,
     /**
      * <simple-block>
      */
-    simpleBlock = "<simple-block>",
+    simpleBlock = 9,
     /**
      * <comment-token>
      */
-    comment = "<comment-token>",
+    comment = 10,
     /**
      * <at-keyword-token>
      */
-    atKeyword = "<at-keyword-token>",
+    atKeyword = 11,
     /**
      * <hash-token>
      */
-    hash = "<hash-token>",
+    hash = 12,
     /**
      * <function>
      * This is a complete consumed function: <function-token>([<component-value> [, <component-value>]*])")"
      */
-    function = "<function>",
-
-
+    function = 14,
     /**
      * Unicode range token.
      * U+AB00?? or U+FFAA-FFFF like range of unicode tokens.
      */
-    unicodeRange = "<unicode-range-token>"
+    unicodeRange = 15
 }
 
 interface InputTokenObject {
@@ -220,7 +218,7 @@ export class CSS3Parser {
                         return this.consumeAUnicodeRangeToken();
                     }
                 }
-                return this.consumeAnIdentLikeToken() || this.consumeADelimToken();
+                return this.consumeAnIdentLikeToken();
             case "$":
             case "*":
             case "^":
@@ -297,7 +295,7 @@ export class CSS3Parser {
         this.nextInputCodePointIndex = numberRegEx.lastIndex;
         if (this.text[this.nextInputCodePointIndex] === "%") {
             this.nextInputCodePointIndex++;
-            return { type: TokenType.percentage, text: result[0] };
+            return { type: TokenType.percentage, text: result[0] + "%" };
         }
 
         const name = this.consumeAName();
@@ -360,34 +358,29 @@ export class CSS3Parser {
      * https://www.w3.org/TR/css-syntax-3/#consume-a-url-token
      */
     private consumeAURLToken(): InputToken {
-        const start = this.nextInputCodePointIndex - 3 /* url */ - 1 /* ( */;
-        const urlToken: InputToken = { type: TokenType.url, text: "" };
         this.consumeAWhitespace();
         if (this.nextInputCodePointIndex >= this.text.length) {
-            return urlToken;
+            return { type: TokenType.url, text: "" };
         }
         const nextInputCodePoint = this.text[this.nextInputCodePointIndex];
         if (nextInputCodePoint === "\"" || nextInputCodePoint === "'") {
             const stringToken = this.consumeAStringToken();
             // TODO: Handle bad-string.
-            // TODO: Set value instead.
-            urlToken.text = stringToken.text;
             this.consumeAWhitespace();
             if (this.text[this.nextInputCodePointIndex] === ")" || this.nextInputCodePointIndex >= this.text.length) {
                 this.nextInputCodePointIndex++;
-                const end = this.nextInputCodePointIndex;
-                urlToken.text = this.text.substring(start, end);
-                return urlToken;
+                return { type: TokenType.url, text: stringToken.text };
             } else {
                 // TODO: Handle bad-url.
                 return null;
             }
         }
 
+        let text = "";
         while(this.nextInputCodePointIndex < this.text.length) {
             const char = this.text[this.nextInputCodePointIndex++];
             switch(char) {
-                case ")": return urlToken;
+                case ")": return { type: TokenType.url, text };
                 case " ":
                 case "\t":
                 case "\n":
@@ -396,7 +389,7 @@ export class CSS3Parser {
                     this.consumeAWhitespace();
                     if (this.text[this.nextInputCodePointIndex] === ")") {
                         this.nextInputCodePointIndex++;
-                        return urlToken;
+                        return { type: TokenType.url, text };
                     } else {
                         // TODO: Bar url! Consume remnants.
                         return null;
@@ -410,10 +403,10 @@ export class CSS3Parser {
                     throw new Error("Escaping not yet supported!");
                 default:
                     // TODO: Non-printable chars - error.
-                    urlToken.text += char;
+                    text += char;
             }
         }
-        return urlToken;
+        return { type: TokenType.url, text };
     }
 
     /**

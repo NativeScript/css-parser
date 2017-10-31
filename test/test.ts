@@ -61,7 +61,7 @@ describe("css", () => {
                 ")", ";", " ",
                 { type: TokenType.ident, text: "width" },
                 ":", " ",
-                { type: TokenType.percentage, text: "25" },
+                { type: TokenType.percentage, text: "25%" },
                 ";", " ", "}"
             ]);
         });
@@ -192,6 +192,80 @@ ma";
                 { type: TokenType.unicodeRange, start: 1024, end: 1279 },
                 ";", " ", " "
             ]);
-        })
+        });
+        it("match selector", () => {
+            const css = `*[title~="flower"] { border: 5px solid yellow; }`;
+            const tokens = parser.tokenize(css);
+            assert.deepEqual(tokens, [
+                { type: TokenType.delim, text: "*" },
+                "[",
+                { type: TokenType.ident, text: "title" },
+                "~=",
+                { type: TokenType.string, text: "flower" },
+                "]", " ", "{", " ",
+                { type: TokenType.ident, text: "border" },
+                ":", " ",
+                { type: TokenType.dimension, text: "5px" },
+                " ",
+                { type: TokenType.ident, text: "solid" },
+                " ",
+                { type: TokenType.ident, text: "yellow" },
+                ";", " ", "}"
+            ]);
+        });
+        it("numerics", () => {
+            const css = `Button { width: .0; height: 100%; font-size: 10em; }`;
+            const tokens = parser.tokenize(css);
+            assert.deepEqual(tokens, [
+                { type: TokenType.ident, text: "Button" },
+                " ", "{", " ",
+                { type: TokenType.ident, text: "width" },
+                ":", " ",
+                { type: TokenType.number, text: ".0" },
+                ";", " ",
+                { type: TokenType.ident, text: "height" },
+                ":", " ",
+                { type: TokenType.percentage, text: "100%" },
+                ";", " ",
+                { type: TokenType.ident, text: "font-size" },
+                ":", " ",
+                { type: TokenType.dimension, text: "10em" },
+                ";", " ", "}"
+            ]);
+        });
+        it("urls", () => {
+            const css = `
+                @import url(~/app.css); 
+                Button { background: url("res://img1.jpg"); }
+                Label { background: url('res://img1.jpg'); }
+                TextField { background: url(res://img1.jpg); }
+            `;
+            const tokens = parser.tokenize(css);
+            assert.deepEqual(tokens, [
+                " ",
+                { type: TokenType.atKeyword, text: "import" },
+                " ",
+                { type: TokenType.url, text: "~/app.css" },
+                ";", " ",
+                { type: TokenType.ident, text: "Button" },
+                " ", "{", " ",
+                { type: TokenType.ident, text: "background" },
+                ":", " ",
+                { type: TokenType.url, text: "res://img1.jpg" },
+                ";", " ", "}", " ",
+                { type: TokenType.ident, text: "Label" },
+                " ", "{", " ",
+                { type: TokenType.ident, text: "background" },
+                ":", " ",
+                { type: TokenType.url, text: "res://img1.jpg" },
+                ";", " ", "}", " ",
+                { type: TokenType.ident, text: "TextField" },
+                " ", "{", " ",
+                { type: TokenType.ident, text: "background" },
+                ":", " ",
+                { type: TokenType.url, text: "res://img1.jpg" },
+                ";", " ", "}", " "
+            ]);
+        });
     });
 });
