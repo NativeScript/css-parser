@@ -4,7 +4,7 @@
   "description": "A project with mocha-typescript enabled",
   "main": "index.js",
   "scripts": {
-    "test": "tsc && nyc mocha && tslint --project .",
+    "test": "tsc && nyc mocha && tslint --project . && node test/perf.js",
     "watch": "mocha-typescript-watch",
     "prepare": "tsc && tslint --project .",
     "tslint-fix": "tslint --fix --project .",
@@ -25,9 +25,11 @@
     "@types/mocha": "*",
     "@types/node": "^8.0.47",
     "chai": "*",
+    "css-parse": "^2.0.0",
     "mocha": "*",
     "mocha-typescript": "*",
     "nyc": "*",
+    "shady-css-parser": "^0.1.0",
     "source-map-support": "*",
     "typescript": "*"
   },
