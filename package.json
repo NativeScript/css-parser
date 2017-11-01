@@ -4,10 +4,11 @@
   "description": "A project with mocha-typescript enabled",
   "main": "index.js",
   "scripts": {
-    "pretest": "tsc",
-    "test": "nyc mocha",
+    "test": "tsc && nyc mocha && tslint --project .",
     "watch": "mocha-typescript-watch",
-    "prepare": "tsc"
+    "prepare": "tsc && tslint --project .",
+    "tslint-fix": "tslint --fix --project .",
+    "tslint": "tslint --project ."
   },
   "repository": {
     "type": "git",
@@ -47,5 +48,8 @@
       "text-summary"
     ],
     "all": true
+  },
+  "dependencies": {
+    "tslint": "^5.8.0"
   }
 }

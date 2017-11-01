@@ -1,8 +1,8 @@
 // Reference mocha-typescript's global definitions:
 /// <reference path="../node_modules/mocha-typescript/globals.d.ts" />
 
-import { CSS3Parser, TokenType } from "../src/index";
 import { assert } from "chai";
+import { CSS3Parser, TokenType } from "../src/index";
 
 describe("css", () => {
     describe("tokenize", () => {
@@ -21,7 +21,7 @@ describe("css", () => {
                 { type: TokenType.ident, text: "background" },
                 ":", " ",
                 { type: TokenType.ident, text: "red" },
-                ";", " ", "}"
+                ";", " ", "}",
             ]);
         });
         it("@import url(~/app.css); Button { color: orange; }", () => {
@@ -36,7 +36,7 @@ describe("css", () => {
                 { type: TokenType.ident, text: "color" },
                 ":", " ",
                 { type: TokenType.ident, text: "orange" },
-                ";", " ", "}"
+                ";", " ", "}",
             ]);
         });
         it("some", () => {
@@ -62,7 +62,7 @@ describe("css", () => {
                 { type: TokenType.ident, text: "width" },
                 ":", " ",
                 { type: TokenType.percentage, text: "25%" },
-                ";", " ", "}"
+                ";", " ", "}",
             ]);
         });
         it("@keyframes", () => {
@@ -87,7 +87,7 @@ describe("css", () => {
                 { type: TokenType.ident, text: "top" },
                 ":", " ",
                 { type: TokenType.dimension, text: "200px" },
-                ";", " ", "}", " ", "}"
+                ";", " ", "}", " ", "}",
             ]);
         });
         it("linear-gradient(rgba(...", () => {
@@ -118,7 +118,7 @@ describe("css", () => {
                 ",", " ",
                 { type: TokenType.delim, text: "#" },
                 { type: TokenType.dimension, text: "00F" },
-                ")", ";", " ", "}"
+                ")", ";", " ", "}",
             ]);
         });
         it("string tokens", () => {
@@ -143,7 +143,7 @@ ma";
                 { type: TokenType.ident, text: "font" },
                 ":", " ",
                 { type: TokenType.string, text: "Tahoma\"" },
-                ";", " ", "}"
+                ";", " ", "}",
             ]);
         });
         it("escaped ident", () => {
@@ -155,7 +155,7 @@ ma";
                 { type: TokenType.ident, text: "color" },
                 ":", " ",
                 { type: TokenType.ident, text: "red" },
-                ";", " ", "}"
+                ";", " ", "}",
             ]);
         });
         it("unicode range", () => {
@@ -190,7 +190,7 @@ ma";
                 { type: TokenType.unicodeRange, start: 37, end: 255 },
                 ",", " ",
                 { type: TokenType.unicodeRange, start: 1024, end: 1279 },
-                ";", " ", " "
+                ";", " ", " ",
             ]);
         });
         it("match selector", () => {
@@ -210,7 +210,7 @@ ma";
                 { type: TokenType.ident, text: "solid" },
                 " ",
                 { type: TokenType.ident, text: "yellow" },
-                ";", " ", "}"
+                ";", " ", "}",
             ]);
         });
         it("numerics", () => {
@@ -230,12 +230,12 @@ ma";
                 { type: TokenType.ident, text: "font-size" },
                 ":", " ",
                 { type: TokenType.dimension, text: "10em" },
-                ";", " ", "}"
+                ";", " ", "}",
             ]);
         });
         it("urls", () => {
             const css = `
-                @import url(~/app.css); 
+                @import url(~/app.css);
                 Button { background: url("res://img1.jpg"); }
                 Label { background: url('res://img1.jpg'); }
                 TextField { background: url(res://img1.jpg); }
@@ -264,7 +264,7 @@ ma";
                 { type: TokenType.ident, text: "background" },
                 ":", " ",
                 { type: TokenType.url, text: "res://img1.jpg" },
-                ";", " ", "}", " "
+                ";", " ", "}", " ",
             ]);
         });
     });
