@@ -5,14 +5,10 @@ import { assert } from "chai";
 import { CSS3Parser, TokenType } from "../src/index";
 
 describe("css", () => {
+    let parser: CSS3Parser;
+    before("create parser", () => parser = new CSS3Parser());
+    after("dispose parser", () => parser = null);
     describe("tokenize", () => {
-        let parser: CSS3Parser;
-        before("create parser", () => {
-            parser = new CSS3Parser();
-        });
-        after("dispose parser", () => {
-            parser = null;
-        });
         it("Button { background: red; }", () => {
             const tokens = parser.tokenize("Button { background: red; }");
             assert.deepEqual(tokens, [
@@ -266,6 +262,46 @@ ma";
                 { type: TokenType.url, text: "res://img1.jpg" },
                 ";", " ", "}", " ",
             ]);
+        });
+    });
+    describe("parse", () => {
+        it("Button { background: red; }", () => {
+            const stylesheet = parser.parseAStylesheet("Button { background: red; }");
+            assert.deepEqual(stylesheet, {
+                rules: [
+                    {
+                        type: "qualified-rule",
+                        prelude: [
+                            {
+                                type: TokenType.ident,
+                                text: "Button"
+                            },
+                            " "
+                        ],
+                        block: {
+                            type: TokenType.simpleBlock,
+                            associatedToken: "{",
+                            values: [
+                                " ",
+                                { type: TokenType.ident, text: "background" },
+                                ":", " ",
+                                { type: TokenType.ident, text: "red" },
+                                ";", " "
+                            ]
+                        }
+                    }
+                ]
+            });
+        });
+        it.skip("@import url(~/app.css); Button { color: orange; }", () => {
+            const stylesheet = parser.parseAStylesheet("@import url(~/app.css); Button { color: orange; }");
+            assert.deepEqual(stylesheet, {
+                rules: [
+                    {
+                        type: "at-rule"
+                    }
+                ]
+            });
         });
     });
 });
