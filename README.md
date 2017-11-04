@@ -18,7 +18,7 @@ There are coverage goals, try not to break them.
 
 During development, there is a typescript watcher that will rerun tests upon .ts save:
 ```
-npm run test
+npm run watch
 ```
 
 Debugging should be available in VSCode via the "Mocha Tests" configuration.
