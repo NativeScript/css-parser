@@ -106,7 +106,7 @@ interface FunctionInputToken extends InputTokenObject {
 /**
  * This is a completely parsed function like "<ident>([component [, component]*])".
  */
-interface FunctionToken extends InputTokenObject {
+interface FunctionToken {
     type: TokenType.functionTokenObject;
     name: string;
     components: any[];
@@ -523,7 +523,7 @@ export class CSS3Parser extends CSS3Tokenizer {
         this.reset(text);
         this.topLevelFlag = true;
         const stylesheet: Stylesheet = {
-            rules: this.consumeAListOfRules()
+            rules: this.consumeAListOfRules(),
         };
         return stylesheet;
     }
@@ -535,8 +535,8 @@ export class CSS3Parser extends CSS3Tokenizer {
     public consumeAListOfRules(): Rule[] {
         const rules: Rule[] = [];
         let inputToken: InputToken;
-        while(inputToken = this.consumeAToken()) {
-            switch(inputToken) {
+        while (inputToken = this.consumeAToken()) {
+            switch (inputToken) {
                 case " ": continue;
                 case "<!--":
                 case "-->":
@@ -549,9 +549,9 @@ export class CSS3Parser extends CSS3Tokenizer {
                     }
                     continue;
             }
-            if ((<InputTokenObject>inputToken).type === TokenType.atKeyword) {
+            if ((inputToken as InputTokenObject).type === TokenType.atKeyword) {
                 // TODO: Better typechecking...
-                const atRule = this.consumeAnAtRule(<AtKeywordToken>inputToken);
+                const atRule = this.consumeAnAtRule(inputToken as AtKeywordToken);
                 if (atRule) {
                     rules.push(atRule);
                 }
@@ -574,17 +574,17 @@ export class CSS3Parser extends CSS3Tokenizer {
             type: "at-rule",
             name: reconsumedInputToken.text, // TODO: What if it is not an @whatever?
             prelude: [],
-            block: undefined
-        }
+            block: undefined,
+        };
         let inputToken: InputToken;
-        while(inputToken = this.consumeAToken()) {
+        while (inputToken = this.consumeAToken()) {
             if (inputToken === ";") {
                 return atRule;
             } else if (inputToken === "{") {
                 atRule.block = this.consumeASimpleBlock(inputToken);
                 return atRule;
-            } else if ((<InputTokenObject>inputToken).type === TokenType.simpleBlock && (<SimpleBlock>inputToken).associatedToken === "{") {
-                atRule.block = <SimpleBlock>inputToken;
+            } else if ((inputToken as InputTokenObject).type === TokenType.simpleBlock && (inputToken as SimpleBlock).associatedToken === "{") {
+                atRule.block = inputToken as SimpleBlock;
                 return atRule;
             }
             const component = this.consumeAComponentValue(inputToken);
@@ -603,16 +603,16 @@ export class CSS3Parser extends CSS3Tokenizer {
         const qualifiedRule: QualifiedRule = {
             type: "qualified-rule",
             prelude: [],
-            block: undefined
+            block: undefined,
         };
         let inputToken: InputToken = reconsumedInputToken;
         do {
             if (inputToken === "{") {
-                let block = this.consumeASimpleBlock(inputToken);
+                const block = this.consumeASimpleBlock(inputToken);
                 qualifiedRule.block = block;
                 return qualifiedRule;
-            } else if ((<InputTokenObject>inputToken).type === TokenType.simpleBlock) {
-                const simpleBlock: SimpleBlock = <SimpleBlock>inputToken;
+            } else if ((inputToken as InputTokenObject).type === TokenType.simpleBlock) {
+                const simpleBlock: SimpleBlock = inputToken as SimpleBlock;
                 if (simpleBlock.associatedToken === "{") {
                     qualifiedRule.block = simpleBlock;
                     return qualifiedRule;
@@ -622,7 +622,7 @@ export class CSS3Parser extends CSS3Tokenizer {
             if (componentValue) {
                 qualifiedRule.prelude.push(componentValue);
             }
-        } while(inputToken = this.consumeAToken());
+        } while (inputToken = this.consumeAToken());
         // TODO: This is a parse error, log parse errors!
         return null;
     }
@@ -632,14 +632,14 @@ export class CSS3Parser extends CSS3Tokenizer {
      * https://www.w3.org/TR/css-syntax-3/#consume-a-component-value
      */
     private consumeAComponentValue(reconsumedInputToken: InputToken): InputToken {
-        switch(reconsumedInputToken) {
+        switch (reconsumedInputToken) {
             case "{":
             case "[":
             case "(":
                 return this.consumeASimpleBlock(reconsumedInputToken);
         }
         if (typeof reconsumedInputToken === "object" && reconsumedInputToken.type === TokenType.functionToken) {
-            return this.consumeAFunction((<FunctionInputToken>reconsumedInputToken).text);
+            return this.consumeAFunction((reconsumedInputToken as FunctionInputToken).text);
         }
         return reconsumedInputToken;
     }
@@ -652,15 +652,15 @@ export class CSS3Parser extends CSS3Tokenizer {
         const endianToken = {
             "[": "]",
             "{": "}",
-            "(": ")"
+            "(": ")",
         }[associatedToken];
         const block: SimpleBlock = {
             type: TokenType.simpleBlock,
             associatedToken,
-            values: []
+            values: [],
         };
         let nextInputToken: InputToken;
-        while(nextInputToken = this.consumeAToken()) {
+        while (nextInputToken = this.consumeAToken()) {
             if (nextInputToken === endianToken) {
                 return block;
             }
@@ -677,9 +677,9 @@ export class CSS3Parser extends CSS3Tokenizer {
      * https://www.w3.org/TR/css-syntax-3/#consume-a-function
      */
     private consumeAFunction(name: string): InputToken {
-        const functionToken: FunctionToken = { type: TokenType.functionTokenObject, name, text: undefined, components: [] };
+        const functionToken: FunctionToken = { type: TokenType.functionTokenObject, name, components: [] };
         let nextInputToken: InputToken;
-        while(nextInputToken = this.consumeAToken()) {
+        while (nextInputToken = this.consumeAToken()) {
             if (nextInputToken === ")") {
                 return functionToken;
             }

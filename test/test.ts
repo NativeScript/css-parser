@@ -231,6 +231,7 @@ ma";
         });
         it("urls", () => {
             const css = `
+                @import url( ~/app.css );
                 @import url(~/app.css);
                 Button { background: url("res://img1.jpg"); }
                 Label { background: url('res://img1.jpg'); }
@@ -239,6 +240,10 @@ ma";
             const tokens = parser.tokenize(css);
             assert.deepEqual(tokens, [
                 " ",
+                { type: TokenType.atKeyword, text: "import" },
+                " ",
+                { type: TokenType.url, text: "~/app.css" },
+                ";", " ",
                 { type: TokenType.atKeyword, text: "import" },
                 " ",
                 { type: TokenType.url, text: "~/app.css" },
@@ -274,9 +279,9 @@ ma";
                         prelude: [
                             {
                                 type: TokenType.ident,
-                                text: "Button"
+                                text: "Button",
                             },
-                            " "
+                            " ",
                         ],
                         block: {
                             type: TokenType.simpleBlock,
@@ -286,21 +291,189 @@ ma";
                                 { type: TokenType.ident, text: "background" },
                                 ":", " ",
                                 { type: TokenType.ident, text: "red" },
-                                ";", " "
-                            ]
-                        }
-                    }
-                ]
+                                ";", " ",
+                            ],
+                        },
+                    },
+                ],
             });
         });
-        it.skip("@import url(~/app.css); Button { color: orange; }", () => {
+        it("@import url(~/app.css); Button { color: orange; }", () => {
             const stylesheet = parser.parseAStylesheet("@import url(~/app.css); Button { color: orange; }");
             assert.deepEqual(stylesheet, {
                 rules: [
                     {
-                        type: "at-rule"
-                    }
-                ]
+                        type: "at-rule",
+                        name: "import",
+                        prelude: [" ", { type: TokenType.url, text: "~/app.css" }],
+                        block: undefined,
+                    },
+                    {
+                        type: "qualified-rule",
+                        prelude: [{ type: TokenType.ident, text: "Button" }, " "],
+                        block: {
+                            type: TokenType.simpleBlock,
+                            associatedToken: "{",
+                            values: [
+                                " ",
+                                { type: TokenType.ident, text: "color" },
+                                ":", " ",
+                                { type: TokenType.ident, text: "orange" },
+                                ";", " ",
+                            ],
+                        },
+                    },
+                ],
+            });
+        });
+        it("linear-gradient(rgba(...", () => {
+            const css = `Button {
+                background: linear-gradient(-90deg, rgba(255, 0, 0, 0), blue, #FFFF00, #00F);
+            }`;
+            const stylesheet = parser.parseAStylesheet(css);
+            assert.deepEqual(stylesheet, {
+                rules: [
+                    {
+                        type: "qualified-rule",
+                        prelude: [{ type: TokenType.ident, text: "Button" }, " "],
+                        block: {
+                            associatedToken: "{",
+                            type: TokenType.simpleBlock,
+                            values: [
+                                " ",
+                                { type: TokenType.ident, text: "background" },
+                                ":", " ",
+                                {
+                                    type: TokenType.functionTokenObject,
+                                    name: "linear-gradient",
+                                    components: [
+                                        { type: TokenType.dimension, text: "-90deg" },
+                                        ",", " ",
+                                        {
+                                            type: TokenType.functionTokenObject,
+                                            name: "rgba",
+                                            components: [
+                                                { type: TokenType.number, text: "255" },
+                                                ",", " ",
+                                                { type: TokenType.number, text: "0" },
+                                                ",", " ",
+                                                { type: TokenType.number, text: "0" },
+                                                ",", " ",
+                                                { type: TokenType.number, text: "0" },
+                                            ],
+                                        },
+                                        ",", " ",
+                                        { type: TokenType.ident, text: "blue" },
+                                        ",", " ",
+                                        { type: TokenType.hash, text: "FFFF00" },
+                                        ",", " ",
+                                        { type: TokenType.delim, text: "#" },
+                                        { type: TokenType.dimension, text: "00F" },
+                                    ],
+                                },
+                                ";", " ",
+                            ],
+                        },
+                    },
+                ],
+            });
+        });
+        it("@keyframe", () => {
+            const css = `
+                @keyframes example {
+                    0% { transform: scale(1, 1); }
+                    100% { transform: scale(1, 0); }
+                }
+                div {
+                    animation: example 5s linear 2s infinite alternate;
+                }
+            `;
+            const stylesheet = parser.parseAStylesheet(css);
+            assert.deepEqual(stylesheet, {
+                rules: [
+                    {
+                        type: "at-rule",
+                        name: "keyframes",
+                        prelude: [" ", { type: TokenType.ident, text: "example" }, " "],
+                        block: {
+                            type: TokenType.simpleBlock,
+                            associatedToken: "{",
+                            values: [
+                                " ",
+                                { type: TokenType.percentage, text: "0%" },
+                                " ",
+                                {
+                                    type: TokenType.simpleBlock,
+                                    associatedToken: "{",
+                                    values: [
+                                        " ",
+                                        { type: TokenType.ident, text: "transform" },
+                                        ":", " ",
+                                        {
+                                            type: TokenType.functionTokenObject,
+                                            name: "scale",
+                                            components: [
+                                                { type: TokenType.number, text: "1" },
+                                                ",", " ",
+                                                { type: TokenType.number, text: "1" },
+                                            ],
+                                        },
+                                        ";", " ",
+                                    ],
+                                },
+                                " ",
+                                { type: TokenType.percentage, text: "100%" },
+                                " ",
+                                {
+                                    type: TokenType.simpleBlock,
+                                    associatedToken: "{",
+                                    values: [
+                                        " ",
+                                        { type: TokenType.ident, text: "transform" },
+                                        ":", " ",
+                                        {
+                                            type: TokenType.functionTokenObject,
+                                            name: "scale",
+                                            components: [
+                                                { type: TokenType.number, text: "1" },
+                                                ",", " ",
+                                                { type: TokenType.number, text: "0" },
+                                            ],
+                                        },
+                                        ";", " ",
+                                    ],
+                                },
+                                " ",
+                            ],
+                        },
+                    },
+                    {
+                        type: "qualified-rule",
+                        prelude: [{ type: TokenType.ident, text: "div" }, " "],
+                        block: {
+                            associatedToken: "{",
+                            type: TokenType.simpleBlock,
+                            values: [
+                                " ",
+                                { type: TokenType.ident, text: "animation" },
+                                ":", " ",
+                                { type: TokenType.ident, text: "example" },
+                                " ",
+                                { type: TokenType.dimension, text: "5s" },
+                                " ",
+                                { type: TokenType.ident, text: "linear" },
+                                " ",
+                                { type: TokenType.dimension, text: "2s" },
+                                " ",
+                                { type: TokenType.ident, text: "infinite" },
+                                " ",
+                                { type: TokenType.ident, text: "alternate" },
+                                ";",
+                                " ",
+                            ],
+                        },
+                    },
+                ],
             });
         });
     });
