@@ -2,15 +2,15 @@
 /// <reference path="../node_modules/mocha-typescript/globals.d.ts" />
 
 import { assert } from "chai";
-import { CSS3Parser, TokenType } from "../src/index";
+import { Parser, Tokenizer, TokenType } from "../src/index";
 
 describe("css", () => {
-    let parser: CSS3Parser;
-    before("create parser", () => parser = new CSS3Parser());
+    let parser: Parser;
+    before("create parser", () => parser = new Parser());
     after("dispose parser", () => parser = null);
     describe("tokenize", () => {
         it("Button { background: red; }", () => {
-            const tokens = parser.tokenize("Button { background: red; }");
+            const tokens = [...new Tokenizer("Button { background: red; }")];
             assert.deepEqual(tokens, [
                 { type: TokenType.ident, text: "Button" },
                 " ", "{", " ",
@@ -21,7 +21,7 @@ describe("css", () => {
             ]);
         });
         it("@import url(~/app.css); Button { color: orange; }", () => {
-            const tokens = parser.tokenize("@import url(~/app.css); Button { color: orange; }");
+            const tokens = [...new Tokenizer("@import url(~/app.css); Button { color: orange; }")];
             assert.deepEqual(tokens, [
                 { type: TokenType.atKeyword, text: "import" },
                 " ",
@@ -40,7 +40,7 @@ describe("css", () => {
                 background: rgba(255, 0, 0, 1);
                 width: 25%;
             }`;
-            const tokens = parser.tokenize(css);
+            const tokens = [...new Tokenizer(css)];
             assert.deepEqual(tokens, [
                 { type: TokenType.ident, text: "Button" },
                 " ", "{", " ",
@@ -66,7 +66,7 @@ describe("css", () => {
                 from { top: 0px; }
                 to { top: 200px; }
             }`;
-            const tokens = parser.tokenize(css);
+            const tokens = [...new Tokenizer(css)];
             assert.deepEqual(tokens, [
                 { type: TokenType.atKeyword, text: "keyframes" },
                 " ",
@@ -90,7 +90,7 @@ describe("css", () => {
             const css = `Button {
                 background: linear-gradient(-90deg, rgba(255, 0, 0, 0), blue, #FFFF00, #00F);
             }`;
-            const tokens = parser.tokenize(css);
+            const tokens = [...new Tokenizer(css)];
             assert.deepEqual(tokens, [
                 { type: TokenType.ident, text: "Button" },
                 " ", "{", " ",
@@ -123,7 +123,7 @@ describe("css", () => {
                 font: "Taho${"\\\n"}ma";
                 font: 'Tahoma"';
             }`;
-            const tokens = parser.tokenize(css);
+            const tokens = [...new Tokenizer(css)];
             assert.deepEqual(tokens, [
                 { type: TokenType.ident, text: "Button" },
                 " ", "{", " ",
@@ -143,7 +143,7 @@ describe("css", () => {
         });
         it("escaped ident", () => {
             const css = `\\42utton { color: red; }`;
-            const tokens = parser.tokenize(css);
+            const tokens = [...new Tokenizer(css)];
             assert.deepEqual(tokens, [
                 { type: TokenType.ident, text: "Button" },
                 " ", "{", " ",
@@ -161,7 +161,7 @@ describe("css", () => {
                 unicode-range: U+4??;              /* wildcard range */
                 unicode-range: U+0025-00FF, U+4??; /* multiple values */
             `;
-            const tokens = parser.tokenize(css);
+            const tokens = [...new Tokenizer(css)];
             assert.deepEqual(tokens, [
                 " ",
                 { type: TokenType.ident, text: "unicode-range" },
@@ -190,7 +190,7 @@ describe("css", () => {
         });
         it("match selector", () => {
             const css = `*[title~="flower"] { border: 5px solid yellow; }`;
-            const tokens = parser.tokenize(css);
+            const tokens = [...new Tokenizer(css)];
             assert.deepEqual(tokens, [
                 { type: TokenType.delim, text: "*" },
                 "[",
@@ -210,7 +210,7 @@ describe("css", () => {
         });
         it("numerics", () => {
             const css = `Button { width: .0; height: 100%; font-size: 10em; }`;
-            const tokens = parser.tokenize(css);
+            const tokens = [...new Tokenizer(css)];
             assert.deepEqual(tokens, [
                 { type: TokenType.ident, text: "Button" },
                 " ", "{", " ",
@@ -236,7 +236,7 @@ describe("css", () => {
                 Label { background: url('res://img1.jpg'); }
                 TextField { background: url(res://img1.jpg); }
             `;
-            const tokens = parser.tokenize(css);
+            const tokens = [...new Tokenizer(css)];
             assert.deepEqual(tokens, [
                 " ",
                 { type: TokenType.atKeyword, text: "import" },

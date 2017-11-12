@@ -3,6 +3,7 @@ import * as reworkCssParse from 'css-parse';
 import * as fs from "fs";
 import * as shadyCss from 'shady-css-parser';
 import * as nativescriptCss from '../src/index';
+import { Tokenizer } from '../src/index';
 
 const themeCoreLightIos = fs.readFileSync(`${__dirname}/assets/core.light.css`).toString();
 
@@ -58,7 +59,7 @@ const shadyDuration = trapDuration(() => {
     const ast = shadyParser.parse(themeCoreLightIos);
 });
 const nativescriptParseDuration = trapDuration(() => {
-    const cssparser = new nativescriptCss.CSS3Parser();
+    const cssparser = new nativescriptCss.Parser();
     // TODO: Replace with parseAStylesheet when ready
     const stylesheet = cssparser.parseAStylesheet(themeCoreLightIos);
 });

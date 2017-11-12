@@ -142,9 +142,9 @@ function isHex(char: string): boolean {
  * 4. Tokenization
  * https://www.w3.org/TR/css-syntax-3/#tokenization
  */
-export class CSS3Tokenizer {
+export class Tokenizer implements Iterator<InputToken>, IteratorResult<InputToken> {
 
-    private static escape(text: string): string {
+    protected static escape(text: string): string {
         return text.replace(/\\[a-fA-F0-9]{1,6}\s?/g, (s) => {
                 const code = "0x" + s.substr(1);
                 const char = String.fromCharCode(parseInt(code, 16));
@@ -156,33 +156,21 @@ export class CSS3Tokenizer {
             });
     }
 
-    protected topLevelFlag: boolean;
+    public done: boolean;
+    public value: InputToken;
 
     private nextInputCodePointIndex = 0;
-    private text: string;
 
-    /**
-     * For testing purposes.
-     * This method allows us to run and assert the proper working of the tokenizer.
-     */
-    public tokenize(text: string): InputToken[] {
-        this.reset(text);
+    constructor(private text: string) {}
 
-        const tokens: InputToken[] = [];
-        let inputToken: InputToken;
-        while (inputToken = this.consumeAToken()) {
-            tokens.push(inputToken);
-        }
-        return tokens;
+    public next(): IteratorResult<InputToken> {
+        this.value = this.consumeAToken();
+        this.done = !this.value;
+        return this;
     }
 
-    /**
-     * Cleans up the parser state and prepares to parse the provided text.
-     */
-    protected reset(text: string) {
-        this.text = text;
-        this.nextInputCodePointIndex = 0;
-        this.topLevelFlag = false;
+    public [Symbol.iterator]() {
+        return this;
     }
 
     /**
@@ -371,7 +359,7 @@ export class CSS3Tokenizer {
             }
             this.nextInputCodePointIndex = doubleQuoteStringRegEx.lastIndex;
         }
-        const text = CSS3Parser.escape(result[1]);
+        const text = Tokenizer.escape(result[1]);
         return { type: TokenType.string, text };
     }
 
@@ -481,7 +469,7 @@ export class CSS3Tokenizer {
             return null;
         }
         this.nextInputCodePointIndex = nameRegEx.lastIndex;
-        const text = CSS3Parser.escape(result[0]);
+        const text = Tokenizer.escape(result[0]);
         return { type: TokenType.ident, text };
     }
 
@@ -514,13 +502,17 @@ export class CSS3Tokenizer {
  * 5. Parsing
  * https://www.w3.org/TR/css-syntax-3/#parsing
  */
-export class CSS3Parser extends CSS3Tokenizer {
+export class Parser {
+
+    protected topLevelFlag: boolean;
+    protected tokens: Iterator<InputToken>;
+
     /**
      * 5.3.1. Parse a stylesheet
      * https://www.w3.org/TR/css-syntax-3/#parse-a-stylesheet
      */
-    public parseAStylesheet(text: string): Stylesheet {
-        this.reset(text);
+    public parseAStylesheet(tokens: string | Iterable<InputToken>): Stylesheet {
+        this.tokens = typeof tokens === "string" ? new Tokenizer(tokens) : tokens[Symbol.iterator]();
         this.topLevelFlag = true;
         const stylesheet: Stylesheet = {
             rules: this.consumeAListOfRules(),
@@ -532,10 +524,10 @@ export class CSS3Parser extends CSS3Tokenizer {
      * 5.4.1. Consume a list of rules
      * https://www.w3.org/TR/css-syntax-3/#consume-a-list-of-rules
      */
-    public consumeAListOfRules(): Rule[] {
+    protected consumeAListOfRules(): Rule[] {
         const rules: Rule[] = [];
         let inputToken: InputToken;
-        while (inputToken = this.consumeAToken()) {
+        while (inputToken = this.tokens.next().value) {
             switch (inputToken) {
                 case " ": continue;
                 case "<!--":
@@ -569,7 +561,7 @@ export class CSS3Parser extends CSS3Tokenizer {
      * 5.4.2. Consume an at-rule
      * https://www.w3.org/TR/css-syntax-3/#consume-an-at-rule
      */
-    public consumeAnAtRule(reconsumedInputToken: AtKeywordToken): AtRule {
+    protected consumeAnAtRule(reconsumedInputToken: AtKeywordToken): Rule {
         const atRule: AtRule = {
             type: "at-rule",
             name: reconsumedInputToken.text, // TODO: What if it is not an @whatever?
@@ -577,7 +569,7 @@ export class CSS3Parser extends CSS3Tokenizer {
             block: undefined,
         };
         let inputToken: InputToken;
-        while (inputToken = this.consumeAToken()) {
+        while (inputToken = this.tokens.next().value) {
             if (inputToken === ";") {
                 return atRule;
             } else if (inputToken === "{") {
@@ -599,7 +591,7 @@ export class CSS3Parser extends CSS3Tokenizer {
      * 5.4.3. Consume a qualified rule
      * https://www.w3.org/TR/css-syntax-3/#consume-a-qualified-rule
      */
-    public consumeAQualifiedRule(reconsumedInputToken: InputToken): QualifiedRule {
+    protected consumeAQualifiedRule(reconsumedInputToken: InputToken): Rule {
         const qualifiedRule: QualifiedRule = {
             type: "qualified-rule",
             prelude: [],
@@ -622,7 +614,7 @@ export class CSS3Parser extends CSS3Tokenizer {
             if (componentValue) {
                 qualifiedRule.prelude.push(componentValue);
             }
-        } while (inputToken = this.consumeAToken());
+        } while (inputToken = this.tokens.next().value);
         // TODO: This is a parse error, log parse errors!
         return null;
     }
@@ -631,7 +623,7 @@ export class CSS3Parser extends CSS3Tokenizer {
      * 5.4.6. Consume a component value
      * https://www.w3.org/TR/css-syntax-3/#consume-a-component-value
      */
-    private consumeAComponentValue(reconsumedInputToken: InputToken): InputToken {
+    protected consumeAComponentValue(reconsumedInputToken: InputToken): InputToken {
         switch (reconsumedInputToken) {
             case "{":
             case "[":
@@ -648,7 +640,7 @@ export class CSS3Parser extends CSS3Tokenizer {
      * 5.4.7. Consume a simple block
      * https://www.w3.org/TR/css-syntax-3/#consume-a-simple-block
      */
-    private consumeASimpleBlock(associatedToken: "[" | "{" | "("): SimpleBlock {
+    protected consumeASimpleBlock(associatedToken: "[" | "{" | "("): SimpleBlock {
         const endianToken = {
             "[": "]",
             "{": "}",
@@ -660,7 +652,7 @@ export class CSS3Parser extends CSS3Tokenizer {
             values: [],
         };
         let nextInputToken: InputToken;
-        while (nextInputToken = this.consumeAToken()) {
+        while (nextInputToken = this.tokens.next().value) {
             if (nextInputToken === endianToken) {
                 return block;
             }
@@ -676,10 +668,10 @@ export class CSS3Parser extends CSS3Tokenizer {
      * 5.4.8. Consume a function
      * https://www.w3.org/TR/css-syntax-3/#consume-a-function
      */
-    private consumeAFunction(name: string): InputToken {
+    protected consumeAFunction(name: string): InputToken {
         const functionToken: FunctionToken = { type: TokenType.functionTokenObject, name, components: [] };
         let nextInputToken: InputToken;
-        while (nextInputToken = this.consumeAToken()) {
+        while (nextInputToken = this.tokens.next().value) {
             if (nextInputToken === ")") {
                 return functionToken;
             }
@@ -693,112 +685,8 @@ export class CSS3Parser extends CSS3Tokenizer {
 }
 
 // /**
-//  * Consume a CSS3 parsed stylesheet and convert the rules and selectors to the
-//  * NativeScript internal JSON representation.
+//  * 8. CSS stylesheets
+//  * https://www.w3.org/TR/css-syntax-3/#css-stylesheets
 //  */
-// export class CSSNativeScript {
-//     public parseStylesheet(stylesheet: Stylesheet): any {
-//         return {
-//             type: "stylesheet",
-//             stylesheet: {
-//                 rules: this.parseRules(stylesheet.rules)
-//             }
-//         }
-//     }
-
-//     private parseRules(rules: Rule[]): any {
-//         return rules.map(rule => this.parseRule(rule));
-//     }
-
-//     private parseRule(rule: Rule): any {
-//         if (rule.type === "at-rule") {
-//             return this.parseAtRule(rule);
-//         } else if (rule.type === "qualified-rule") {
-//             return this.parseQualifiedRule(rule);
-//         }
-//     }
-
-//     private parseAtRule(rule: AtRule): any {
-//         if (rule.name === "import") {
-//             // TODO: We have used an "@improt { url('path somewhere'); }" at few places.
-//             return {
-//                 import: rule.prelude.map(m => typeof m === "string" ? m : m.text).join("").trim(),
-//                 type: "import"
-//             }
-//         }
-//         return;
-//     }
-
-//     private parseQualifiedRule(rule: QualifiedRule): any {
-//         return {
-//             type: "rule",
-//             selectors: this.preludeToSelectorsStringArray(rule.prelude),
-//             declarations: this.ruleBlockToDeclarations(rule.block.values)
-//         }
-//     }
-
-//     private ruleBlockToDeclarations(declarationsInputTokens: InputToken[]): { type: "declaration", property: string, value: string }[] {
-//         // return <any>declarationsInputTokens;
-//         const declarations: { type: "declaration", property: string, value: string }[] = [];
-
-//         let property = "";
-//         let value = "";
-//         let reading: "property" | "value" = "property";
-
-//         for (var i = 0; i < declarationsInputTokens.length; i++) {
-//             let inputToken = declarationsInputTokens[i];
-//             if (reading === "property") {
-//                 if (inputToken === ":") {
-//                     reading = "value";
-//                 } else if (typeof inputToken === "string") {
-//                     property += inputToken;
-//                 } else {
-//                     property += inputToken.text;
-//                 }
-//             } else {
-//                 if (inputToken === ";") {
-//                     property = property.trim();
-//                     value = value.trim();
-//                     declarations.push({ type: "declaration", property, value });
-//                     property = "";
-//                     value = "";
-//                     reading = "property";
-//                 } else if (typeof inputToken === "string") {
-//                     value += inputToken;
-//                 } else {
-//                     value += inputToken.text;
-//                 }
-//             }
-//         }
-//         property = property.trim();
-//         value = value.trim();
-//         if (property || value) {
-//             declarations.push({ type: "declaration", property, value });
-//         }
-//         return declarations;
-//     }
-
-//     private preludeToSelectorsStringArray(prelude: InputToken[]): string[] {
-//         let selectors = [];
-//         let selector = "";
-//         // TODO:
-//         prelude.forEach(inputToken => {
-//             if (typeof inputToken === "string") {
-//                 if (inputToken === ",") {
-//                     if (selector) {
-//                         selectors.push(selector.trim());
-//                     }
-//                     selector = "";
-//                 } else {
-//                     selector += inputToken;
-//                 }
-//             } else if (typeof inputToken === "object") {
-//                 selector += inputToken.text;
-//             }
-//         });
-//         if (selector) {
-//             selectors.push(selector.trim());
-//         }
-//         return selectors;
-//     }
+// class CSSParser extends Parser {
 // }
