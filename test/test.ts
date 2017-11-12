@@ -120,8 +120,7 @@ describe("css", () => {
         it("string tokens", () => {
             const css = `Button {
                 font: "\\54 ah'o\\"ma";
-                font: "Taho\
-ma";
+                font: "Taho${"\\\n"}ma";
                 font: 'Tahoma"';
             }`;
             const tokens = parser.tokenize(css);

@@ -150,7 +150,7 @@ export class CSS3Tokenizer {
                 const char = String.fromCharCode(parseInt(code, 16));
                 return char;
             })
-            .replace(/\\./g, (s) => {
+            .replace(/\\(?:.|\n)/g, (s) => {
                 if (s[1] === "\n") { return ""; }
                 return s[1];
             });
