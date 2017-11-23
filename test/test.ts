@@ -1,8 +1,11 @@
 // Reference mocha-typescript's global definitions:
 /// <reference path="../node_modules/mocha-typescript/globals.d.ts" />
 
+import * as fs from "fs";
+
 import { assert } from "chai";
-import { Parser, Tokenizer, TokenType } from "../src/index";
+import * as cssParse from "css-parse";
+import { Parser, TokenType } from "../src/index";
 
 describe("css", () => {
     let parser: Parser;
@@ -10,7 +13,7 @@ describe("css", () => {
     after("dispose parser", () => parser = null);
     describe("tokenize", () => {
         it("Button { background: red; }", () => {
-            const tokens = [...new Tokenizer("Button { background: red; }")];
+            const tokens = parser.tokenize("Button { background: red; }");
             assert.deepEqual(tokens, [
                 { type: TokenType.ident, text: "Button" },
                 " ", "{", " ",
@@ -21,7 +24,7 @@ describe("css", () => {
             ]);
         });
         it("@import url(~/app.css); Button { color: orange; }", () => {
-            const tokens = [...new Tokenizer("@import url(~/app.css); Button { color: orange; }")];
+            const tokens = parser.tokenize("@import url(~/app.css); Button { color: orange; }");
             assert.deepEqual(tokens, [
                 { type: TokenType.atKeyword, text: "import" },
                 " ",
@@ -40,7 +43,7 @@ describe("css", () => {
                 background: rgba(255, 0, 0, 1);
                 width: 25%;
             }`;
-            const tokens = [...new Tokenizer(css)];
+            const tokens = parser.tokenize(css);
             assert.deepEqual(tokens, [
                 { type: TokenType.ident, text: "Button" },
                 " ", "{", " ",
@@ -57,7 +60,7 @@ describe("css", () => {
                 ")", ";", " ",
                 { type: TokenType.ident, text: "width" },
                 ":", " ",
-                { type: TokenType.percentage, text: "25%" },
+                { type: TokenType.percentage, text: "25" },
                 ";", " ", "}",
             ]);
         });
@@ -66,7 +69,7 @@ describe("css", () => {
                 from { top: 0px; }
                 to { top: 200px; }
             }`;
-            const tokens = [...new Tokenizer(css)];
+            const tokens = parser.tokenize(css);
             assert.deepEqual(tokens, [
                 { type: TokenType.atKeyword, text: "keyframes" },
                 " ",
@@ -90,7 +93,7 @@ describe("css", () => {
             const css = `Button {
                 background: linear-gradient(-90deg, rgba(255, 0, 0, 0), blue, #FFFF00, #00F);
             }`;
-            const tokens = [...new Tokenizer(css)];
+            const tokens = parser.tokenize(css);
             assert.deepEqual(tokens, [
                 { type: TokenType.ident, text: "Button" },
                 " ", "{", " ",
@@ -123,7 +126,7 @@ describe("css", () => {
                 font: "Taho${"\\\n"}ma";
                 font: 'Tahoma"';
             }`;
-            const tokens = [...new Tokenizer(css)];
+            const tokens = parser.tokenize(css);
             assert.deepEqual(tokens, [
                 { type: TokenType.ident, text: "Button" },
                 " ", "{", " ",
@@ -143,7 +146,7 @@ describe("css", () => {
         });
         it("escaped ident", () => {
             const css = `\\42utton { color: red; }`;
-            const tokens = [...new Tokenizer(css)];
+            const tokens = parser.tokenize(css);
             assert.deepEqual(tokens, [
                 { type: TokenType.ident, text: "Button" },
                 " ", "{", " ",
@@ -161,7 +164,7 @@ describe("css", () => {
                 unicode-range: U+4??;              /* wildcard range */
                 unicode-range: U+0025-00FF, U+4??; /* multiple values */
             `;
-            const tokens = [...new Tokenizer(css)];
+            const tokens = parser.tokenize(css);
             assert.deepEqual(tokens, [
                 " ",
                 { type: TokenType.ident, text: "unicode-range" },
@@ -190,7 +193,7 @@ describe("css", () => {
         });
         it("match selector", () => {
             const css = `*[title~="flower"] { border: 5px solid yellow; }`;
-            const tokens = [...new Tokenizer(css)];
+            const tokens = parser.tokenize(css);
             assert.deepEqual(tokens, [
                 { type: TokenType.delim, text: "*" },
                 "[",
@@ -210,7 +213,7 @@ describe("css", () => {
         });
         it("numerics", () => {
             const css = `Button { width: .0; height: 100%; font-size: 10em; }`;
-            const tokens = [...new Tokenizer(css)];
+            const tokens = parser.tokenize(css);
             assert.deepEqual(tokens, [
                 { type: TokenType.ident, text: "Button" },
                 " ", "{", " ",
@@ -220,7 +223,7 @@ describe("css", () => {
                 ";", " ",
                 { type: TokenType.ident, text: "height" },
                 ":", " ",
-                { type: TokenType.percentage, text: "100%" },
+                { type: TokenType.percentage, text: "100" },
                 ";", " ",
                 { type: TokenType.ident, text: "font-size" },
                 ":", " ",
@@ -236,7 +239,7 @@ describe("css", () => {
                 Label { background: url('res://img1.jpg'); }
                 TextField { background: url(res://img1.jpg); }
             `;
-            const tokens = [...new Tokenizer(css)];
+            const tokens = parser.tokenize(css);
             assert.deepEqual(tokens, [
                 " ",
                 { type: TokenType.atKeyword, text: "import" },
@@ -272,57 +275,65 @@ describe("css", () => {
         it("Button { background: red; }", () => {
             const stylesheet = parser.parseAStylesheet("Button { background: red; }");
             assert.deepEqual(stylesheet, {
-                rules: [
-                    {
-                        type: "qualified-rule",
-                        prelude: [
-                            {
-                                type: TokenType.ident,
-                                text: "Button",
-                            },
-                            " ",
-                        ],
-                        block: {
-                            type: TokenType.simpleBlock,
-                            associatedToken: "{",
-                            values: [
+                type: "stylesheet",
+                stylesheet: {
+                    rules: [
+                        {
+                            type: "qualified-rule",
+                            prelude: [
+                                {
+                                    type: TokenType.ident,
+                                    text: "Button",
+                                },
                                 " ",
-                                { type: TokenType.ident, text: "background" },
-                                ":", " ",
-                                { type: TokenType.ident, text: "red" },
-                                ";", " ",
                             ],
+                            block: {
+                                type: TokenType.simpleBlock,
+                                associatedToken: "{",
+                                values: [
+                                    " ",
+                                    { type: TokenType.ident, text: "background" },
+                                    ":", " ",
+                                    { type: TokenType.ident, text: "red" },
+                                    ";", " ",
+                                ],
+                            },
                         },
-                    },
-                ],
+                    ],
+                    parsingErrors: [],
+                },
             });
         });
         it("@import url(~/app.css); Button { color: orange; }", () => {
             const stylesheet = parser.parseAStylesheet("@import url(~/app.css); Button { color: orange; }");
             assert.deepEqual(stylesheet, {
-                rules: [
-                    {
-                        type: "at-rule",
-                        name: "import",
-                        prelude: [" ", { type: TokenType.url, text: "~/app.css" }],
-                        block: undefined,
-                    },
-                    {
-                        type: "qualified-rule",
-                        prelude: [{ type: TokenType.ident, text: "Button" }, " "],
-                        block: {
-                            type: TokenType.simpleBlock,
-                            associatedToken: "{",
-                            values: [
-                                " ",
-                                { type: TokenType.ident, text: "color" },
-                                ":", " ",
-                                { type: TokenType.ident, text: "orange" },
-                                ";", " ",
-                            ],
+                type: "stylesheet",
+                stylesheet: {
+                    rules: [
+                        {
+                            type: "at-rule",
+                            name: "import",
+                            prelude: [" ", { type: TokenType.url, text: "~/app.css" }],
+                            block: undefined,
                         },
-                    },
-                ],
+                        {
+                            type: "qualified-rule",
+                            prelude: [{ type: TokenType.ident, text: "Button" }, " "],
+                            block: {
+                                type: TokenType.simpleBlock,
+                                associatedToken: "{",
+                                values: [
+                                    " ",
+                                    { type: TokenType.ident, text: "color" },
+                                    ":", " ",
+                                    { type: TokenType.ident, text: "orange" },
+                                    ";", " ",
+                                ],
+                            },
+                        },
+                    ],
+                    parsingErrors: [],
+                },
             });
         });
         it("linear-gradient(rgba(...", () => {
@@ -331,50 +342,54 @@ describe("css", () => {
             }`;
             const stylesheet = parser.parseAStylesheet(css);
             assert.deepEqual(stylesheet, {
-                rules: [
-                    {
-                        type: "qualified-rule",
-                        prelude: [{ type: TokenType.ident, text: "Button" }, " "],
-                        block: {
-                            associatedToken: "{",
-                            type: TokenType.simpleBlock,
-                            values: [
-                                " ",
-                                { type: TokenType.ident, text: "background" },
-                                ":", " ",
-                                {
-                                    type: TokenType.functionTokenObject,
-                                    name: "linear-gradient",
-                                    components: [
-                                        { type: TokenType.dimension, text: "-90deg" },
-                                        ",", " ",
-                                        {
-                                            type: TokenType.functionTokenObject,
-                                            name: "rgba",
-                                            components: [
-                                                { type: TokenType.number, text: "255" },
-                                                ",", " ",
-                                                { type: TokenType.number, text: "0" },
-                                                ",", " ",
-                                                { type: TokenType.number, text: "0" },
-                                                ",", " ",
-                                                { type: TokenType.number, text: "0" },
-                                            ],
-                                        },
-                                        ",", " ",
-                                        { type: TokenType.ident, text: "blue" },
-                                        ",", " ",
-                                        { type: TokenType.hash, text: "FFFF00" },
-                                        ",", " ",
-                                        { type: TokenType.delim, text: "#" },
-                                        { type: TokenType.dimension, text: "00F" },
-                                    ],
-                                },
-                                ";", " ",
-                            ],
+                type: "stylesheet",
+                stylesheet: {
+                    rules: [
+                        {
+                            type: "qualified-rule",
+                            prelude: [{ type: TokenType.ident, text: "Button" }, " "],
+                            block: {
+                                associatedToken: "{",
+                                type: TokenType.simpleBlock,
+                                values: [
+                                    " ",
+                                    { type: TokenType.ident, text: "background" },
+                                    ":", " ",
+                                    {
+                                        type: TokenType.functionObject,
+                                        name: "linear-gradient",
+                                        components: [
+                                            { type: TokenType.dimension, text: "-90deg" },
+                                            ",", " ",
+                                            {
+                                                type: TokenType.functionObject,
+                                                name: "rgba",
+                                                components: [
+                                                    { type: TokenType.number, text: "255" },
+                                                    ",", " ",
+                                                    { type: TokenType.number, text: "0" },
+                                                    ",", " ",
+                                                    { type: TokenType.number, text: "0" },
+                                                    ",", " ",
+                                                    { type: TokenType.number, text: "0" },
+                                                ],
+                                            },
+                                            ",", " ",
+                                            { type: TokenType.ident, text: "blue" },
+                                            ",", " ",
+                                            { type: TokenType.hash, text: "FFFF00" },
+                                            ",", " ",
+                                            { type: TokenType.delim, text: "#" },
+                                            { type: TokenType.dimension, text: "00F" },
+                                        ],
+                                    },
+                                    ";", " ",
+                                ],
+                            },
                         },
-                    },
-                ],
+                    ],
+                    parsingErrors: [],
+                },
             });
         });
         it("@keyframe", () => {
@@ -389,91 +404,121 @@ describe("css", () => {
             `;
             const stylesheet = parser.parseAStylesheet(css);
             assert.deepEqual(stylesheet, {
-                rules: [
-                    {
-                        type: "at-rule",
-                        name: "keyframes",
-                        prelude: [" ", { type: TokenType.ident, text: "example" }, " "],
-                        block: {
-                            type: TokenType.simpleBlock,
-                            associatedToken: "{",
-                            values: [
-                                " ",
-                                { type: TokenType.percentage, text: "0%" },
-                                " ",
-                                {
-                                    type: TokenType.simpleBlock,
-                                    associatedToken: "{",
-                                    values: [
-                                        " ",
-                                        { type: TokenType.ident, text: "transform" },
-                                        ":", " ",
-                                        {
-                                            type: TokenType.functionTokenObject,
-                                            name: "scale",
-                                            components: [
-                                                { type: TokenType.number, text: "1" },
-                                                ",", " ",
-                                                { type: TokenType.number, text: "1" },
-                                            ],
-                                        },
-                                        ";", " ",
-                                    ],
-                                },
-                                " ",
-                                { type: TokenType.percentage, text: "100%" },
-                                " ",
-                                {
-                                    type: TokenType.simpleBlock,
-                                    associatedToken: "{",
-                                    values: [
-                                        " ",
-                                        { type: TokenType.ident, text: "transform" },
-                                        ":", " ",
-                                        {
-                                            type: TokenType.functionTokenObject,
-                                            name: "scale",
-                                            components: [
-                                                { type: TokenType.number, text: "1" },
-                                                ",", " ",
-                                                { type: TokenType.number, text: "0" },
-                                            ],
-                                        },
-                                        ";", " ",
-                                    ],
-                                },
-                                " ",
-                            ],
+                type: "stylesheet",
+                stylesheet: {
+                    rules: [
+                        {
+                            type: "at-rule",
+                            name: "keyframes",
+                            prelude: [" ", { type: TokenType.ident, text: "example" }, " "],
+                            block: {
+                                type: TokenType.simpleBlock,
+                                associatedToken: "{",
+                                values: [
+                                    " ",
+                                    { type: TokenType.percentage, text: "0" },
+                                    " ",
+                                    {
+                                        type: TokenType.simpleBlock,
+                                        associatedToken: "{",
+                                        values: [
+                                            " ",
+                                            { type: TokenType.ident, text: "transform" },
+                                            ":", " ",
+                                            {
+                                                type: TokenType.functionObject,
+                                                name: "scale",
+                                                components: [
+                                                    { type: TokenType.number, text: "1" },
+                                                    ",", " ",
+                                                    { type: TokenType.number, text: "1" },
+                                                ],
+                                            },
+                                            ";", " ",
+                                        ],
+                                    },
+                                    " ",
+                                    { type: TokenType.percentage, text: "100" },
+                                    " ",
+                                    {
+                                        type: TokenType.simpleBlock,
+                                        associatedToken: "{",
+                                        values: [
+                                            " ",
+                                            { type: TokenType.ident, text: "transform" },
+                                            ":", " ",
+                                            {
+                                                type: TokenType.functionObject,
+                                                name: "scale",
+                                                components: [
+                                                    { type: TokenType.number, text: "1" },
+                                                    ",", " ",
+                                                    { type: TokenType.number, text: "0" },
+                                                ],
+                                            },
+                                            ";", " ",
+                                        ],
+                                    },
+                                    " ",
+                                ],
+                            },
                         },
-                    },
-                    {
-                        type: "qualified-rule",
-                        prelude: [{ type: TokenType.ident, text: "div" }, " "],
-                        block: {
-                            associatedToken: "{",
-                            type: TokenType.simpleBlock,
-                            values: [
-                                " ",
-                                { type: TokenType.ident, text: "animation" },
-                                ":", " ",
-                                { type: TokenType.ident, text: "example" },
-                                " ",
-                                { type: TokenType.dimension, text: "5s" },
-                                " ",
-                                { type: TokenType.ident, text: "linear" },
-                                " ",
-                                { type: TokenType.dimension, text: "2s" },
-                                " ",
-                                { type: TokenType.ident, text: "infinite" },
-                                " ",
-                                { type: TokenType.ident, text: "alternate" },
-                                ";",
-                                " ",
-                            ],
+                        {
+                            type: "qualified-rule",
+                            prelude: [{ type: TokenType.ident, text: "div" }, " "],
+                            block: {
+                                associatedToken: "{",
+                                type: TokenType.simpleBlock,
+                                values: [
+                                    " ",
+                                    { type: TokenType.ident, text: "animation" },
+                                    ":", " ",
+                                    { type: TokenType.ident, text: "example" },
+                                    " ",
+                                    { type: TokenType.dimension, text: "5s" },
+                                    " ",
+                                    { type: TokenType.ident, text: "linear" },
+                                    " ",
+                                    { type: TokenType.dimension, text: "2s" },
+                                    " ",
+                                    { type: TokenType.ident, text: "infinite" },
+                                    " ",
+                                    { type: TokenType.ident, text: "alternate" },
+                                    ";",
+                                    " ",
+                                ],
+                            },
                         },
-                    },
-                ],
+                    ],
+                    parsingErrors: [],
+                },
             });
         });
+    });
+    describe("css stylesheet as rework", () => {
+        function compare(css: string): void {
+            const nativescript = parser.parseACSSStylesheet(css);
+            // console.log(JSON.stringify(nativescript));
+            // Strip type info and undefined properties.
+            const rework = JSON.parse(JSON.stringify(cssParse(css)));
+            assert.deepEqual(nativescript, rework);
+        }
+        it("Button, Label { background: red; }", () => {
+            compare("Button, Label {\n  background: red;\n}\n");
+        });
+        it("Label { color: argb(1, 255, 0, 0); }", () => {
+            compare("Label { color: argb(1, 255, 0, 0); }");
+        });
+        it("Div { width: 50%; height: 30px; border-width: 2; }", () => {
+            compare("Div { width: 50%; height: 30px; border-width: 2; }");
+        });
+        it("Div {color:#212121;opacity:.9}", () => {
+            compare("Div {color:#212121;opacity:.9}");
+        });
+        it("core.light.css", () => {
+            const css = fs.readFileSync("./test/assets/core.light.css").toString();
+            compare(css);
+        });
+        // TODO: Complete implementation of string-ly values for declarations and do extensive testing...
     });
 });

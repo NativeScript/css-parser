@@ -61,7 +61,7 @@ const shadyDuration = trapDuration(() => {
 const nativescriptParseDuration = trapDuration(() => {
     const cssparser = new nativescriptCss.Parser();
     // TODO: Replace with parseAStylesheet when ready
-    const stylesheet = cssparser.parseAStylesheet(themeCoreLightIos);
+    const stylesheet = cssparser.parseACSSStylesheet(themeCoreLightIos);
 });
 console.log(`Baseline perf: .charCodeAt: ${charCodeByCharCodeDuration.toFixed(3)}ms. .charAt: ${charByCharDuration.toFixed(3)}ms. []: ${indexerDuration.toFixed(3)}ms. compareCharIf: ${compareCharIfDuration.toFixed(3)}ms. compareCharRegEx: ${compareCharRegExDuration.toFixed(3)}ms.
 Parsers perf: rework: ${reworkDuration.toFixed(3)}ms. shady: ${shadyDuration.toFixed(3)}ms. {N}: ${nativescriptParseDuration.toFixed(3)}ms.

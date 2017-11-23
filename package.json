@@ -31,7 +31,7 @@
     "nyc": "*",
     "shady-css-parser": "^0.1.0",
     "source-map-support": "*",
-    "typescript": "*"
+    "typescript": "^2.6.1"
   },
   "nyc": {
     "check-coverage": true,

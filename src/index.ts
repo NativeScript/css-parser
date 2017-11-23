@@ -1,7 +1,13 @@
+import { Declaration } from "shady-css-parser/dist/shady-css/common";
+
 export interface Stylesheet {
-    rules: Rule[];
+    type: "stylesheet";
+    stylesheet: {
+        rules: Rule[];
+        parsingErrors: string[];
+    };
 }
-export type Rule = QualifiedRule | AtRule;
+export type Rule = QualifiedRule | AtRule | StyleRule;
 
 export interface AtRule {
     type: "at-rule";
@@ -14,7 +20,26 @@ export interface QualifiedRule {
     prelude: InputToken[];
     block: SimpleBlock;
 }
-
+export interface StyleRule {
+    type: "rule";
+    selectors: string[];
+    declarations: Array<Decl | AtRule>;
+    position: Source;
+}
+export interface Decl {
+    type: "declaration";
+    property: string;
+    value: string;
+    position: Source;
+}
+export interface Source {
+    start: Position;
+    end: Position;
+}
+export interface Position {
+    line: number;
+    column: number;
+}
 const whitespaceRegEx = /[\s\t\n\r\f]*/gym;
 
 const singleQuoteStringRegEx = /'((?:[^\n\r\f\\']|\\(?:\$|\n|[0-9a-fA-F]{1,6}\s?|'))*)(?:'|$)/gym; // Besides $n, parse escape
@@ -25,9 +50,42 @@ const nameRegEx = /-?(?:(?:[a-zA-Z_]|[^\x00-\x7F]|\\(?:\$|\n|[0-9a-fA-F]{1,6}\s?
 const nonQuoteURLRegEx = /(:?[^\)\s\t\n\r\f\'\"\(]|\\(?:\$|\n|[0-9a-fA-F]{1,6}\s?))*/gym; // TODO: non-printable code points omitted
 
 type SimpleTokens = "(" | ")" | "{" | "}" | "[" | "]" | ":" | ";" | "," | " " | "^=" | "|=" | "$=" | "*=" | "~=" | "<!--" | "-->";
-type ObjectTokens = InputTokenObject | FunctionInputToken | FunctionToken | SimpleBlock | AtKeywordToken | UnicodeRangeToken | AtKeywordToken;
+type ObjectTokens = StringToken | DelimToken | NumberToken | Percentage | DimensionToken | IdentToken | URLToken | FunctionToken | SimpleBlock | Comment | AtKeywordToken | HashToken | FunctionObject | UnicodeRangeToken;
 
 type InputToken = SimpleTokens | ObjectTokens;
+
+const endianTokenMap = {
+    "[": "]" as "]",
+    "{": "}" as "}",
+    "(": ")" as ")",
+};
+
+const toCompressedStringMap: { [key: number]: (inputToken: InputToken) => string } = {
+    [undefined as any](token: SimpleTokens) { return token; },
+    [TokenType.string](token: StringToken) { return "'" + token.text + "'"; },
+    [TokenType.delim](token: DelimToken) { return token.text; },
+    [TokenType.number](token: NumberToken) { return token.text; },
+    [TokenType.percentage](token: Percentage) { return token.text + "%"; },
+    [TokenType.dimension](token: DimensionToken) { return token.text; },
+    [TokenType.ident](token: URLToken) { return token.text; },
+    [TokenType.functionToken](token: FunctionToken) { return token.text + "("; },
+    [TokenType.simpleBlock](token: SimpleBlock) {
+        return token.associatedToken + token.values.map(toString).join("") + endianTokenMap[token.associatedToken];
+    },
+    [TokenType.comment](token: Comment) { return "/**/"; },
+    [TokenType.atKeyword](token: AtKeywordToken) { return "@" + token.text; },
+    [TokenType.hash](token: HashToken) { return "#" + token.text; },
+    [TokenType.functionObject](token: FunctionObject) {
+        return token.name + "(" + token.components.map(toString).join("") + ")";
+    },
+    [TokenType.unicodeRange](token: UnicodeRangeToken): never {
+        throw new Error("Not implemented");
+    },
+};
+
+export function toString(token: InputToken): string {
+    return toCompressedStringMap[(token as any).type](token);
+}
 
 export const enum TokenType {
     /**
@@ -83,7 +141,7 @@ export const enum TokenType {
      * <function>
      * This is a complete consumed function: <function-token>([<component-value> [, <component-value>]*])")"
      */
-    functionTokenObject = 14,
+    functionObject = 14,
     /**
      * Unicode range token.
      * U+AB00?? or U+FFAA-FFFF like range of unicode tokens.
@@ -91,45 +149,73 @@ export const enum TokenType {
     unicodeRange = 15,
 }
 
-interface InputTokenObject {
-    type: TokenType;
+interface StringToken {
+    type: TokenType.string;
     text: string;
 }
-
+interface DelimToken {
+    type: TokenType.delim;
+    text: string;
+}
+interface NumberToken {
+    type: TokenType.number;
+    text: string;
+}
+interface Percentage {
+    type: TokenType.percentage;
+    text: string;
+}
+interface DimensionToken {
+    type: TokenType.dimension;
+    text: string;
+}
+interface IdentToken {
+    type: TokenType.ident;
+    text: string;
+}
+interface URLToken {
+    type: TokenType.url;
+    text: string;
+}
 /**
  * This is an "<ident>(" token.
  */
-interface FunctionInputToken extends InputTokenObject {
+interface FunctionToken {
     type: TokenType.functionToken;
+    text: string;
 }
-
+interface SimpleBlock {
+    type: TokenType.simpleBlock;
+    associatedToken: "(" | "{" | "[";
+    values: InputToken[];
+}
+/**
+ * Plese note, the tokenizer filters the comment tokens according to the spec.
+ */
+interface Comment {
+    type: TokenType.comment;
+    text: string;
+}
+interface AtKeywordToken {
+    type: TokenType.atKeyword;
+    text: string;
+}
+interface HashToken {
+    type: TokenType.hash;
+    text: string;
+}
 /**
  * This is a completely parsed function like "<ident>([component [, component]*])".
  */
-interface FunctionToken {
-    type: TokenType.functionTokenObject;
+interface FunctionObject {
+    type: TokenType.functionObject;
     name: string;
     components: any[];
 }
-
-interface SimpleBlock {
-    type: TokenType.simpleBlock;
-    associatedToken: InputToken;
-    values: InputToken[];
-}
-
-interface AtKeywordToken extends InputTokenObject {
-    type: TokenType.atKeyword;
-}
-
 interface UnicodeRangeToken {
     type: TokenType.unicodeRange;
     start: number;
     end: number;
-}
-
-interface AtKeywordToken extends InputTokenObject {
-    type: TokenType.atKeyword;
 }
 
 function isHex(char: string): boolean {
@@ -142,7 +228,7 @@ function isHex(char: string): boolean {
  * 4. Tokenization
  * https://www.w3.org/TR/css-syntax-3/#tokenization
  */
-export class Tokenizer implements Iterator<InputToken>, IteratorResult<InputToken> {
+export class Tokenizer {
 
     protected static escape(text: string): string {
         return text.replace(/\\[a-fA-F0-9]{1,6}\s?/g, (s) => {
@@ -156,21 +242,39 @@ export class Tokenizer implements Iterator<InputToken>, IteratorResult<InputToke
             });
     }
 
-    public done: boolean;
-    public value: InputToken;
+    private line: number;
+    private lineStartIndex: number;
+    private lineEndIndex: number;
 
-    private nextInputCodePointIndex = 0;
+    private prevInputCodePointIndex: number;
+    private nextInputCodePointIndex: number;
+    private text: string;
 
-    constructor(private text: string) {}
-
-    public next(): IteratorResult<InputToken> {
-        this.value = this.consumeAToken();
-        this.done = !this.value;
-        return this;
+    public tokenize(text: string): InputToken[] {
+        this.reset(text);
+        const tokens: InputToken[] = [];
+        let inputToken: InputToken;
+        while (inputToken = this.consumeAToken()) {
+            tokens.push(inputToken);
+        }
+        return tokens;
     }
 
-    public [Symbol.iterator]() {
-        return this;
+    protected reset(text: string) {
+        this.text = text;
+        this.nextInputCodePointIndex = 0;
+
+        this.lineStartIndex = 0;
+        this.lineEndIndex = -1;
+        this.line = 1;
+    }
+
+    protected start(): Position {
+        return this.readNextLine(this.prevInputCodePointIndex);
+    }
+
+    protected end(): Position {
+        return this.readNextLine(this.nextInputCodePointIndex);
     }
 
     /**
@@ -178,6 +282,7 @@ export class Tokenizer implements Iterator<InputToken>, IteratorResult<InputToke
      * https://www.w3.org/TR/css-syntax-3/#consume-a-token
      */
     protected consumeAToken(): InputToken {
+        this.prevInputCodePointIndex = this.nextInputCodePointIndex;
         const char = this.text[this.nextInputCodePointIndex];
         switch (char) {
             case "\"": return this.consumeAStringToken();
@@ -191,23 +296,23 @@ export class Tokenizer implements Iterator<InputToken>, IteratorResult<InputToke
             case "]":
             case "{":
             case "}":
-                this.nextInputCodePointIndex++;
-                return char as any;
+            this.nextInputCodePointIndex++;
+            return char as any;
             case "#": return this.consumeAHashToken() || this.consumeADelimToken();
             case " ":
             case "\t":
             case "\n":
             case "\r":
             case "\f":
-                return this.consumeAWhitespace();
+            return this.consumeAWhitespace();
             case "@": return this.consumeAtKeyword() || this.consumeADelimToken();
             case "\\":
-                if (this.text[this.nextInputCodePointIndex + 1] === "\n") {
-                    // TODO: Log parse error.
-                    this.nextInputCodePointIndex++;
-                    return { type: TokenType.delim, text: "\\" };
-                }
-                return this.consumeAnIdentLikeToken();
+            if (this.text[this.nextInputCodePointIndex + 1] === "\n") {
+                // TODO: Log parse error.
+                this.nextInputCodePointIndex++;
+                return { type: TokenType.delim, text: "\\" };
+            }
+            return this.consumeAnIdentLikeToken();
             case "0":
             case "1":
             case "2":
@@ -218,32 +323,51 @@ export class Tokenizer implements Iterator<InputToken>, IteratorResult<InputToke
             case "7":
             case "8":
             case "9":
-                return this.consumeANumericToken();
+            return this.consumeANumericToken();
             case "u":
             case "U":
-                if (this.text[this.nextInputCodePointIndex + 1] === "+") {
-                    const thirdChar = this.text[this.nextInputCodePointIndex + 2];
-                    if (isHex(thirdChar) || thirdChar === "?") {
-                        this.nextInputCodePointIndex += 2;
-                        return this.consumeAUnicodeRangeToken();
-                    }
+            if (this.text[this.nextInputCodePointIndex + 1] === "+") {
+                const thirdChar = this.text[this.nextInputCodePointIndex + 2];
+                if (isHex(thirdChar) || thirdChar === "?") {
+                    this.nextInputCodePointIndex += 2;
+                    return this.consumeAUnicodeRangeToken();
                 }
-                return this.consumeAnIdentLikeToken();
+            }
+            return this.consumeAnIdentLikeToken();
             case "$":
             case "*":
             case "^":
             case "|":
             case "~":
-                return this.consumeAMatchToken() || this.consumeADelimToken();
+            return this.consumeAMatchToken() || this.consumeADelimToken();
             case "-": return this.consumeANumericToken() || this.consumeAnIdentLikeToken() || this.consumeCDC() || this.consumeADelimToken();
             case "+":
             case ".":
-                return this.consumeANumericToken() || this.consumeADelimToken();
+            return this.consumeANumericToken() || this.consumeADelimToken();
             case "/": return this.consumeAComment() || this.consumeADelimToken();
             case "<": return this.consumeCDO() || this.consumeADelimToken();
             case undefined: return undefined;
             default: return this.consumeAnIdentLikeToken() || this.consumeADelimToken();
         }
+    }
+
+    private readNextLine(index: number): Position {
+        if (this.lineEndIndex === -1) {
+            this.lineEndIndex = this.text.indexOf("\n");
+            if (this.lineEndIndex === -1) {
+                this.lineEndIndex = this.text.length;
+            }
+        }
+        while (index > this.lineEndIndex) {
+            this.lineStartIndex = this.lineEndIndex + 1;
+            this.lineEndIndex = this.text.indexOf("\n", this.lineEndIndex + 1);
+            if (this.lineEndIndex === -1) {
+                this.lineEndIndex = this.text.length;
+            }
+            this.line++;
+        }
+        const column = index - this.lineStartIndex + 1;
+        return { line: this.line, column };
     }
 
     private consumeADelimToken(): InputToken {
@@ -257,7 +381,7 @@ export class Tokenizer implements Iterator<InputToken>, IteratorResult<InputToke
         return " ";
     }
 
-    private consumeAHashToken(): InputTokenObject {
+    private consumeAHashToken(): HashToken {
         this.nextInputCodePointIndex++;
         const hashName = this.consumeAName();
         if (hashName) {
@@ -305,7 +429,7 @@ export class Tokenizer implements Iterator<InputToken>, IteratorResult<InputToke
         this.nextInputCodePointIndex = numberRegEx.lastIndex;
         if (this.text[this.nextInputCodePointIndex] === "%") {
             this.nextInputCodePointIndex++;
-            return { type: TokenType.percentage, text: result[0] + "%" };
+            return { type: TokenType.percentage, text: result[0] };
         }
 
         const name = this.consumeAName();
@@ -330,7 +454,7 @@ export class Tokenizer implements Iterator<InputToken>, IteratorResult<InputToke
             if (name.text.toLowerCase() === "url") {
                 return this.consumeAURLToken();
             }
-            return { type: TokenType.functionToken, text: name.text } as FunctionInputToken;
+            return { type: TokenType.functionToken, text: name.text } as FunctionToken;
         }
         return name;
     }
@@ -339,7 +463,7 @@ export class Tokenizer implements Iterator<InputToken>, IteratorResult<InputToke
      * 4.3.4. Consume a string token
      * https://www.w3.org/TR/css-syntax-3/#consume-a-string-token
      */
-    private consumeAStringToken(): InputTokenObject {
+    private consumeAStringToken(): StringToken {
         const char = this.text[this.nextInputCodePointIndex];
         let result: RegExpExecArray;
 
@@ -462,7 +586,7 @@ export class Tokenizer implements Iterator<InputToken>, IteratorResult<InputToke
      * 4.3.11. Consume a name
      * https://www.w3.org/TR/css-syntax-3/#consume-a-name
      */
-    private consumeAName(): InputTokenObject {
+    private consumeAName(): IdentToken {
         nameRegEx.lastIndex = this.nextInputCodePointIndex;
         const result = nameRegEx.exec(this.text);
         if (!result) {
@@ -473,7 +597,7 @@ export class Tokenizer implements Iterator<InputToken>, IteratorResult<InputToke
         return { type: TokenType.ident, text };
     }
 
-    private consumeAtKeyword(): InputTokenObject {
+    private consumeAtKeyword(): AtKeywordToken {
         this.nextInputCodePointIndex++;
         const name = this.consumeAName();
         if (name) {
@@ -498,24 +622,49 @@ export class Tokenizer implements Iterator<InputToken>, IteratorResult<InputToke
     }
 }
 
+type TokenMap = (consumeAToken: () => InputToken) => () => InputToken;
+
 /**
  * 5. Parsing
  * https://www.w3.org/TR/css-syntax-3/#parsing
  */
-export class Parser {
+export class Parser extends Tokenizer {
 
+    protected parsingCSS: boolean;
     protected topLevelFlag: boolean;
-    protected tokens: Iterator<InputToken>;
 
     /**
      * 5.3.1. Parse a stylesheet
      * https://www.w3.org/TR/css-syntax-3/#parse-a-stylesheet
      */
-    public parseAStylesheet(tokens: string | Iterable<InputToken>): Stylesheet {
-        this.tokens = typeof tokens === "string" ? new Tokenizer(tokens) : tokens[Symbol.iterator]();
+    public parseAStylesheet(text: string): Stylesheet {
+        this.reset(text);
+        this.parsingCSS = false;
         this.topLevelFlag = true;
         const stylesheet: Stylesheet = {
-            rules: this.consumeAListOfRules(),
+            type: "stylesheet",
+            stylesheet: {
+                rules: this.consumeAListOfRules(),
+                parsingErrors: [],
+            },
+        };
+        return stylesheet;
+    }
+
+    /**
+     * 8. CSS stylesheets
+     * https://www.w3.org/TR/css-syntax-3/#css-stylesheets
+     */
+    public parseACSSStylesheet(text: string): Stylesheet {
+        this.reset(text);
+        this.parsingCSS = true;
+        this.topLevelFlag = true;
+        const stylesheet: Stylesheet = {
+            type: "stylesheet",
+            stylesheet: {
+                rules: this.consumeAListOfRules(),
+                parsingErrors: [],
+            },
         };
         return stylesheet;
     }
@@ -527,7 +676,7 @@ export class Parser {
     protected consumeAListOfRules(): Rule[] {
         const rules: Rule[] = [];
         let inputToken: InputToken;
-        while (inputToken = this.tokens.next().value) {
+        while (inputToken = this.consumeAToken()) {
             switch (inputToken) {
                 case " ": continue;
                 case "<!--":
@@ -541,7 +690,7 @@ export class Parser {
                     }
                     continue;
             }
-            if ((inputToken as InputTokenObject).type === TokenType.atKeyword) {
+            if (typeof inputToken === "object" && inputToken.type === TokenType.atKeyword) {
                 // TODO: Better typechecking...
                 const atRule = this.consumeAnAtRule(inputToken as AtKeywordToken);
                 if (atRule) {
@@ -561,7 +710,7 @@ export class Parser {
      * 5.4.2. Consume an at-rule
      * https://www.w3.org/TR/css-syntax-3/#consume-an-at-rule
      */
-    protected consumeAnAtRule(reconsumedInputToken: AtKeywordToken): Rule {
+    protected consumeAnAtRule(reconsumedInputToken: AtKeywordToken): AtRule {
         const atRule: AtRule = {
             type: "at-rule",
             name: reconsumedInputToken.text, // TODO: What if it is not an @whatever?
@@ -569,13 +718,13 @@ export class Parser {
             block: undefined,
         };
         let inputToken: InputToken;
-        while (inputToken = this.tokens.next().value) {
+        while (inputToken = this.consumeAToken()) {
             if (inputToken === ";") {
                 return atRule;
             } else if (inputToken === "{") {
                 atRule.block = this.consumeASimpleBlock(inputToken);
                 return atRule;
-            } else if ((inputToken as InputTokenObject).type === TokenType.simpleBlock && (inputToken as SimpleBlock).associatedToken === "{") {
+            } else if (typeof inputToken === "object" && inputToken.type === TokenType.simpleBlock && inputToken.associatedToken === "{") {
                 atRule.block = inputToken as SimpleBlock;
                 return atRule;
             }
@@ -592,6 +741,11 @@ export class Parser {
      * https://www.w3.org/TR/css-syntax-3/#consume-a-qualified-rule
      */
     protected consumeAQualifiedRule(reconsumedInputToken: InputToken): Rule {
+        // See 8: https://www.w3.org/TR/css-syntax-3/#css-stylesheets
+        if (this.treatQualifiedRulesAsStyleRules()) {
+            return this.consumeAStyleRule(reconsumedInputToken);
+        }
+
         const qualifiedRule: QualifiedRule = {
             type: "qualified-rule",
             prelude: [],
@@ -603,7 +757,7 @@ export class Parser {
                 const block = this.consumeASimpleBlock(inputToken);
                 qualifiedRule.block = block;
                 return qualifiedRule;
-            } else if ((inputToken as InputTokenObject).type === TokenType.simpleBlock) {
+            } else if (typeof inputToken === "object" && inputToken.type === TokenType.simpleBlock) {
                 const simpleBlock: SimpleBlock = inputToken as SimpleBlock;
                 if (simpleBlock.associatedToken === "{") {
                     qualifiedRule.block = simpleBlock;
@@ -614,9 +768,93 @@ export class Parser {
             if (componentValue) {
                 qualifiedRule.prelude.push(componentValue);
             }
-        } while (inputToken = this.tokens.next().value);
+        } while (inputToken = this.consumeAToken());
         // TODO: This is a parse error, log parse errors!
         return null;
+    }
+
+    /**
+     * 5.4.4. Consume a list of declarations
+     * https://www.w3.org/TR/css-syntax-3/#consume-a-list-of-declarations
+     */
+    protected consumeAListOfDeclarations(): Array<Decl | AtRule> {
+        const declarations: Array<Decl | AtRule> = [];
+        let inputToken: InputToken;
+        // NOTE: We may need to treat the "}" as EOF here...
+        while (inputToken = this.consumeAToken()) {
+            if (typeof inputToken === "string") {
+                if (inputToken === " " || inputToken === ";") {
+                    // Do nothing
+                    continue;
+                }
+            } else if (typeof inputToken === "object") {
+                if (inputToken.type === TokenType.atKeyword) {
+                    declarations.push(this.consumeAnAtRule(inputToken));
+                    continue;
+                }
+                if (inputToken.type === TokenType.ident) {
+                    // While the current input token is anything other than a <semicolon-token> or <EOF-token>,
+                    // append it to the temporary list and consume the next input token.
+                    // Consume a declaration from the temporary list.
+                    const declaration = this.doWithTokenStream(
+                        () => this.consumeADeclaration(inputToken as IdentToken),
+                        (consumeAToken) => () => (inputToken = consumeAToken()) === ";" ? undefined : inputToken,
+                    );
+                    if (declaration) {
+                        declarations.push(declaration);
+                    }
+                    if (!inputToken) {
+                        break;
+                    }
+                    continue;
+                }
+            }
+
+            // TODO: Log parse error!
+            while ((inputToken = this.consumeAComponentValue(this.consumeAToken())) && inputToken && inputToken !== ";") {
+                // Error recovery!
+            }
+            if (!inputToken) {
+                break;
+            }
+        }
+        return declarations;
+    }
+
+    protected doWithTokenStream<T>(action: () => T, consumeAToken: TokenMap): T {
+        const original = this.consumeAToken;
+        try {
+            this.consumeAToken = consumeAToken(this.consumeAToken.bind(this));
+            return action();
+        } finally {
+            this.consumeAToken = original;
+        }
+    }
+
+    /**
+     * 5.4.5. Consume a declaration
+     * https://www.w3.org/TR/css-syntax-3/#consume-a-declaration
+     */
+    protected consumeADeclaration(reconsumedInputToken: IdentToken): Decl {
+        const start = this.start();
+        const property = reconsumedInputToken.text;
+        let inputToken: InputToken;
+        do {
+            inputToken = this.consumeAToken();
+        } while (inputToken === " ");
+        if (inputToken !== ":") {
+            return null; // TODO: Parse error!
+        }
+
+        let value = "";
+        while (inputToken = this.consumeAToken()) {
+            value += toString(inputToken);
+        }
+        value = value.trim();
+        const end = this.start();
+        // TODO: If the last non-whitespace tokens are delim "!" and ident "important",
+        // delete them and set the declaration's "important" flag.
+        return { type: "declaration", property, value, position: { start, end } };
     }
 
     /**
@@ -631,7 +869,7 @@ export class Parser {
                 return this.consumeASimpleBlock(reconsumedInputToken);
         }
         if (typeof reconsumedInputToken === "object" && reconsumedInputToken.type === TokenType.functionToken) {
-            return this.consumeAFunction((reconsumedInputToken as FunctionInputToken).text);
+            return this.consumeAFunction((reconsumedInputToken as FunctionToken).text);
         }
         return reconsumedInputToken;
     }
@@ -641,22 +879,18 @@ export class Parser {
      * https://www.w3.org/TR/css-syntax-3/#consume-a-simple-block
      */
     protected consumeASimpleBlock(associatedToken: "[" | "{" | "("): SimpleBlock {
-        const endianToken = {
-            "[": "]",
-            "{": "}",
-            "(": ")",
-        }[associatedToken];
+        const endianToken = endianTokenMap[associatedToken];
         const block: SimpleBlock = {
             type: TokenType.simpleBlock,
             associatedToken,
             values: [],
         };
-        let nextInputToken: InputToken;
-        while (nextInputToken = this.tokens.next().value) {
-            if (nextInputToken === endianToken) {
+        let inputToken: InputToken;
+        while (inputToken = this.consumeAToken()) {
+            if (inputToken === endianToken) {
                 return block;
             }
-            const value = this.consumeAComponentValue(nextInputToken);
+            const value = this.consumeAComponentValue(inputToken);
             if (value) {
                 block.values.push(value);
             }
@@ -669,24 +903,79 @@ export class Parser {
      * https://www.w3.org/TR/css-syntax-3/#consume-a-function
      */
     protected consumeAFunction(name: string): InputToken {
-        const functionToken: FunctionToken = { type: TokenType.functionTokenObject, name, components: [] };
-        let nextInputToken: InputToken;
-        while (nextInputToken = this.tokens.next().value) {
-            if (nextInputToken === ")") {
+        const functionToken: FunctionObject = { type: TokenType.functionObject, name, components: [] };
+        let inputToken: InputToken;
+        while (inputToken = this.consumeAToken()) {
+            if (inputToken === ")") {
                 return functionToken;
             }
-            const component = this.consumeAComponentValue(nextInputToken);
+            const component = this.consumeAComponentValue(inputToken);
             if (component) {
                 functionToken.components.push(component);
             }
         }
         return functionToken;
     }
-}
 
-// /**
-//  * 8. CSS stylesheets
-//  * https://www.w3.org/TR/css-syntax-3/#css-stylesheets
-//  */
-// class CSSParser extends Parser {
-// }
+    protected treatQualifiedRulesAsStyleRules(): boolean {
+        return this.parsingCSS && this.topLevelFlag;
+    }
+
+    /**
+     * 8.1. Style rules
+     * https://www.w3.org/TR/css-syntax-3/#style-rules
+     */
+    protected consumeAStyleRule(reconsumedInputToken: InputToken): Rule {
+        const start = this.start();
+        const selectors: string[] = [];
+        let selector = "";
+        let inputToken: InputToken = reconsumedInputToken;
+        do {
+            if (inputToken === "{") {
+                selector = selector.trim();
+                if (selector) {
+                    selectors.push(selector);
+                }
+
+                const declarations = this.doWithTokenStream(
+                    () => this.consumeAListOfDeclarations(),
+                    (consumeAToken) => () => {
+                        while (inputToken = consumeAToken()) {
+                            if (inputToken === "}") {
+                                return undefined;
+                            }
+                            const value = this.consumeAComponentValue(inputToken);
+                            if (value) {
+                                return value;
+                            }
+                        }
+                        return undefined;
+                    },
+                );
+
+                const end = this.end();
+                return { type: "rule", selectors, declarations, position: { start, end } };
+            } else if (typeof inputToken === "object" && inputToken.type === TokenType.simpleBlock) {
+                const simpleBlock: SimpleBlock = inputToken as SimpleBlock;
+                if (simpleBlock.associatedToken === "{") {
+                    // TODO:
+                    throw new Error("A simple block was found where just a { token was expected!");
+                }
+            }
+            const componentValue = this.consumeAComponentValue(inputToken);
+            if (componentValue) {
+                if (componentValue === ",") {
+                    selector = selector.trim();
+                    if (selector) {
+                        selectors.push(selector);
+                    }
+                    selector = "";
+                } else {
+                    selector += toString(componentValue);
+                }
+            }
+        } while (inputToken = this.consumeAToken());
+        // TODO: This is a parse error, log parse errors!
+        return null;
+    }
+}
