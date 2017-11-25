@@ -624,6 +624,12 @@ export class Tokenizer {
 
 type TokenMap = (consumeAToken: () => InputToken) => () => InputToken;
 
+const enum ParseState {
+    Default = 0,
+    ListOfDeclarations = 1,
+    Declaration = 2,
+}
+
 /**
  * 5. Parsing
  * https://www.w3.org/TR/css-syntax-3/#parsing
@@ -632,6 +638,7 @@ export class Parser extends Tokenizer {
 
     protected parsingCSS: boolean;
     protected topLevelFlag: boolean;
+    protected parseState: ParseState;
 
     /**
      * 5.3.1. Parse a stylesheet
@@ -659,6 +666,7 @@ export class Parser extends Tokenizer {
         this.reset(text);
         this.parsingCSS = true;
         this.topLevelFlag = true;
+        this.parseState = ParseState.Default;
         const stylesheet: Stylesheet = {
             type: "stylesheet",
             stylesheet: {
@@ -667,6 +675,11 @@ export class Parser extends Tokenizer {
             },
         };
         return stylesheet;
+    }
+
+    protected reset(text: string): void {
+        super.reset(text);
+        this.parseState = ParseState.Default;
     }
 
     /**
@@ -782,6 +795,7 @@ export class Parser extends Tokenizer {
         let inputToken: InputToken;
         // NOTE: We may need to treat the "}" as EOF here...
         while (inputToken = this.consumeAToken()) {
+            if (this.parseState === ParseState.Default) { break; }
             if (typeof inputToken === "string") {
                 if (inputToken === " " || inputToken === ";") {
                     // Do nothing
@@ -796,16 +810,10 @@ export class Parser extends Tokenizer {
                     // While the current input token is anything other than a <semicolon-token> or <EOF-token>,
                     // append it to the temporary list and consume the next input token.
                     // Consume a declaration from the temporary list.
-                    const declaration = this.doWithTokenStream(
-                        () => this.consumeADeclaration(inputToken as IdentToken),
-                        (consumeAToken) => () => (inputToken = consumeAToken()) === ";" ? undefined : inputToken,
-                    );
-                    if (declaration) {
-                        declarations.push(declaration);
-                    }
-                    if (!inputToken) {
-                        break;
-                    }
+                    this.parseState = ParseState.Declaration;
+                    const declaration = this.consumeADeclaration(inputToken as IdentToken);
+                    if (declaration) { declarations.push(declaration); }
+                    if (this.parseState as ParseState === ParseState.Default) { break; }
                     continue;
                 }
             }
@@ -819,16 +827,6 @@ export class Parser extends Tokenizer {
             }
         }
         return declarations;
-    }
-
-    protected doWithTokenStream<T>(action: () => T, consumeAToken: TokenMap): T {
-        const original = this.consumeAToken;
-        try {
-            this.consumeAToken = consumeAToken(this.consumeAToken.bind(this));
-            return action();
-        } finally {
-            this.consumeAToken = original;
-        }
     }
 
     /**
@@ -851,10 +849,11 @@ export class Parser extends Tokenizer {
             value += toString(inputToken);
         }
         value = value.trim();
+
         const end = this.start();
         // TODO: If the last non-whitespace tokens are delim "!" and ident "important",
         // delete them and set the declaration's "important" flag.
-        return { type: "declaration", property, value, position: { start, end } };
+        return { type: "declaration", property, value: value as any, position: { start, end } };
     }
 
     /**
@@ -921,6 +920,31 @@ export class Parser extends Tokenizer {
         return this.parsingCSS && this.topLevelFlag;
     }
 
+    protected consumeAToken(): InputToken {
+        if (this.parseState === ParseState.Default) {
+            return super.consumeAToken();
+        }
+        let inputToken: InputToken;
+        while (inputToken = super.consumeAToken()) {
+            if (inputToken === "}") {
+                this.parseState = ParseState.Default;
+                return undefined;
+            }
+            inputToken = this.consumeAComponentValue(inputToken);
+            if (inputToken) {
+                break;
+            }
+        }
+        if (this.parseState === ParseState.ListOfDeclarations) {
+            return inputToken;
+        }
+        if (inputToken === ";") {
+            this.parseState = ParseState.ListOfDeclarations;
+            return undefined;
+        }
+        return inputToken;
+    }
+
     /**
      * 8.1. Style rules
      * https://www.w3.org/TR/css-syntax-3/#style-rules
@@ -936,23 +960,8 @@ export class Parser extends Tokenizer {
                 if (selector) {
                     selectors.push(selector);
                 }
-
-                const declarations = this.doWithTokenStream(
-                    () => this.consumeAListOfDeclarations(),
-                    (consumeAToken) => () => {
-                        while (inputToken = consumeAToken()) {
-                            if (inputToken === "}") {
-                                return undefined;
-                            }
-                            const value = this.consumeAComponentValue(inputToken);
-                            if (value) {
-                                return value;
-                            }
-                        }
-                        return undefined;
-                    },
-                );
-
+                this.parseState = ParseState.ListOfDeclarations;
+                const declarations = this.consumeAListOfDeclarations();
                 const end = this.end();
                 return { type: "rule", selectors, declarations, position: { start, end } };
             } else if (typeof inputToken === "object" && inputToken.type === TokenType.simpleBlock) {

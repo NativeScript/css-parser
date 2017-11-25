@@ -503,6 +503,9 @@ describe("css", () => {
             const rework = JSON.parse(JSON.stringify(cssParse(css)));
             assert.deepEqual(nativescript, rework);
         }
+        it("div{color:red}p{color:blue}", () => {
+            compare("div{color:red}p{color:blue}");
+        });
         it("Button, Label { background: red; }", () => {
             compare("Button, Label {\n  background: red;\n}\n");
         });
