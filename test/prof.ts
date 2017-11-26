@@ -8,9 +8,4 @@ const themeCoreLightIos = fs.readFileSync(`${__dirname}/assets/core.light.css`).
 profiler.startProfiling("parse", true);
 const cssparser = new nativescriptCss.Parser();
 cssparser.parseACSSStylesheet(themeCoreLightIos);
-const profile = profiler.stopProfiling("parse");
-
-profile.export(function(error: any, result: any) {
-    fs.writeFileSync('profile1.json', result);
-    profile.delete();
-});
+profiler.stopProfiling("parse");

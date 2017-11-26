@@ -231,16 +231,19 @@ function isHex(char: string): boolean {
 export class Tokenizer {
 
     protected static escape(text: string): string {
-        return text.replace(/\\[a-fA-F0-9]{1,6}\s?/g, (s) => {
-                const code = "0x" + s.substr(1);
-                const char = String.fromCharCode(parseInt(code, 16));
+        return text.replace(Tokenizer.stringEscapeRegex, (_, utf8, char, nl) => {
+            if (utf8) {
+                const code = "0x" + utf8;
+                const charFromCode = String.fromCharCode(parseInt(code, 16));
+                return charFromCode;
+            } else if (char) {
                 return char;
-            })
-            .replace(/\\(?:.|\n)/g, (s) => {
-                if (s[1] === "\n") { return ""; }
-                return s[1];
-            });
+            } else {
+                return "";
+            }
+        });
     }
+    private static stringEscapeRegex = /\\(?:([a-fA-F0-9]{1,6})\s?|(.)|(\n))/g;
 
     private line: number;
     private lineStartIndex: number;
