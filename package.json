@@ -8,7 +8,8 @@
     "watch": "mocha-typescript-watch",
     "prepare": "tsc && tslint --project .",
     "tslint-fix": "tslint --fix --project .",
-    "tslint": "tslint --project ."
+    "tslint": "tslint --project .",
+    "inspect": "tsc && echo 'Open in chrome: chrome://inspect/#devices' && node --inspect --debug-brk test/prof.js"
   },
   "repository": {
     "type": "git",
