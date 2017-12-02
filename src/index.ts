@@ -50,7 +50,7 @@ const nameRegEx = /-?(?:(?:[a-zA-Z_]|[^\x00-\x7F]|\\(?:\$|\n|[0-9a-fA-F]{1,6}\s?
 const nonQuoteURLRegEx = /(:?[^\)\s\t\n\r\f\'\"\(]|\\(?:\$|\n|[0-9a-fA-F]{1,6}\s?))*/gym; // TODO: non-printable code points omitted
 
 type SimpleTokens = "(" | ")" | "{" | "}" | "[" | "]" | ":" | ";" | "," | " " | "^=" | "|=" | "$=" | "*=" | "~=" | "<!--" | "-->";
-type ObjectTokens = StringToken | DelimToken | NumberToken | Percentage | DimensionToken | IdentToken | URLToken | FunctionToken | SimpleBlock | Comment | AtKeywordToken | HashToken | FunctionObject | UnicodeRangeToken;
+type ObjectTokens = StringToken | DelimToken | NumberToken | PercentageToken | DimensionToken | IdentToken | URLToken | FunctionToken | SimpleBlock | Comment | AtKeywordToken | HashToken | FunctionObject | UnicodeRangeToken;
 
 type InputToken = SimpleTokens | ObjectTokens;
 
@@ -60,31 +60,15 @@ const endianTokenMap = {
     "(": ")" as ")",
 };
 
-const toCompressedStringMap: { [key: number]: (inputToken: InputToken) => string } = {
-    [undefined as any](token: SimpleTokens) { return token; },
-    [TokenType.string](token: StringToken) { return "'" + token.text + "'"; },
-    [TokenType.delim](token: DelimToken) { return token.text; },
-    [TokenType.number](token: NumberToken) { return token.text; },
-    [TokenType.percentage](token: Percentage) { return token.text + "%"; },
-    [TokenType.dimension](token: DimensionToken) { return token.text; },
-    [TokenType.ident](token: URLToken) { return token.text; },
-    [TokenType.functionToken](token: FunctionToken) { return token.text + "("; },
-    [TokenType.simpleBlock](token: SimpleBlock) {
-        return token.associatedToken + token.values.map(toString).join("") + endianTokenMap[token.associatedToken];
-    },
-    [TokenType.comment](token: Comment) { return "/**/"; },
-    [TokenType.atKeyword](token: AtKeywordToken) { return "@" + token.text; },
-    [TokenType.hash](token: HashToken) { return "#" + token.text; },
-    [TokenType.functionObject](token: FunctionObject) {
-        return token.name + "(" + token.components.map(toString).join("") + ")";
-    },
-    [TokenType.unicodeRange](token: UnicodeRangeToken): never {
-        throw new Error("Not implemented");
-    },
-};
-
 export function toString(token: InputToken): string {
-    return toCompressedStringMap[(token as any).type](token);
+    if (typeof token === "string") {
+        return token;
+    }
+    switch (token.type) {
+        case TokenType.functionObject: return token.name + "(" + token.components.map(toString).join("") + ")";
+        case TokenType.simpleBlock: return token.associatedToken + token.values.map(toString).join("") + endianTokenMap[token.associatedToken];
+    }
+    return token.source;
 }
 
 export const enum TokenType {
@@ -151,38 +135,42 @@ export const enum TokenType {
 
 interface StringToken {
     type: TokenType.string;
+    source: string;
     text: string;
 }
 interface DelimToken {
     type: TokenType.delim;
-    text: string;
+    source: string;
 }
 interface NumberToken {
     type: TokenType.number;
-    text: string;
+    source: string;
 }
-interface Percentage {
+interface PercentageToken {
     type: TokenType.percentage;
-    text: string;
+    source: string;
 }
 interface DimensionToken {
     type: TokenType.dimension;
-    text: string;
+    source: string;
 }
 interface IdentToken {
     type: TokenType.ident;
-    text: string;
+    source: string;
+    name: string;
 }
 interface URLToken {
     type: TokenType.url;
-    text: string;
+    source: string;
+    url: string;
 }
 /**
  * This is an "<ident>(" token.
  */
 interface FunctionToken {
     type: TokenType.functionToken;
-    text: string;
+    source: string;
+    name: string;
 }
 interface SimpleBlock {
     type: TokenType.simpleBlock;
@@ -194,15 +182,17 @@ interface SimpleBlock {
  */
 interface Comment {
     type: TokenType.comment;
-    text: string;
+    source: string;
 }
 interface AtKeywordToken {
     type: TokenType.atKeyword;
-    text: string;
+    source: string;
+    name: string;
 }
 interface HashToken {
     type: TokenType.hash;
-    text: string;
+    source: string;
+    name: string;
 }
 /**
  * This is a completely parsed function like "<ident>([component [, component]*])".
@@ -214,6 +204,7 @@ interface FunctionObject {
 }
 interface UnicodeRangeToken {
     type: TokenType.unicodeRange;
+    source: string;
     start: number;
     end: number;
 }
@@ -316,7 +307,7 @@ export class Tokenizer {
             if (this.text[this.nextInputCodePointIndex + 1] === "\n") {
                 // TODO: Log parse error.
                 this.nextInputCodePointIndex++;
-                return { type: TokenType.delim, text: "\\" };
+                return { type: TokenType.delim, source: "\\" };
             }
             return this.consumeAnIdentLikeToken();
             case "0":
@@ -377,7 +368,7 @@ export class Tokenizer {
     }
 
     private consumeADelimToken(): InputToken {
-        return { type: TokenType.delim, text: this.text[this.nextInputCodePointIndex++] };
+        return { type: TokenType.delim, source: this.text[this.nextInputCodePointIndex++] };
     }
 
     private consumeAWhitespace(): InputToken {
@@ -388,10 +379,10 @@ export class Tokenizer {
     }
 
     private consumeAHashToken(): HashToken {
-        this.nextInputCodePointIndex++;
+        const startInputCodePointIndex = this.nextInputCodePointIndex++;
         const hashName = this.consumeAName();
         if (hashName) {
-            return { type: TokenType.hash, text: hashName.text };
+            return { type: TokenType.hash, source: this.text.substring(startInputCodePointIndex, this.nextInputCodePointIndex), name: hashName.name };
         }
         this.nextInputCodePointIndex--;
         return null;
@@ -427,7 +418,7 @@ export class Tokenizer {
      * https://www.w3.org/TR/css-syntax-3/#consume-a-numeric-token
      */
     private consumeANumericToken(): InputToken {
-        numberRegEx.lastIndex = this.nextInputCodePointIndex;
+        const startInputCodePointIndex = numberRegEx.lastIndex = this.nextInputCodePointIndex;
         const result = numberRegEx.exec(this.text);
         if (!result) {
             return null;
@@ -435,34 +426,37 @@ export class Tokenizer {
         this.nextInputCodePointIndex = numberRegEx.lastIndex;
         if (this.text[this.nextInputCodePointIndex] === "%") {
             this.nextInputCodePointIndex++;
-            return { type: TokenType.percentage, text: result[0] };
+            // value: parseFloat(result[0])
+            return { type: TokenType.percentage, source: this.text.substring(startInputCodePointIndex, this.nextInputCodePointIndex) };
         }
 
         const name = this.consumeAName();
         if (name) {
-            return { type: TokenType.dimension, text: result[0] + name.text };
+            // value: parseFloat(result[0]), unit: name.text
+            return { type: TokenType.dimension, source: this.text.substring(startInputCodePointIndex, this.nextInputCodePointIndex) };
         }
 
-        return { type: TokenType.number, text: result[0] };
+        return { type: TokenType.number, source: this.text.substring(startInputCodePointIndex, this.nextInputCodePointIndex) };
     }
 
     /**
      * 4.3.3. Consume an ident-like token
      * https://www.w3.org/TR/css-syntax-3/#consume-an-ident-like-token
      */
-    private consumeAnIdentLikeToken(): InputToken {
-        const name = this.consumeAName();
-        if (!name) {
+    private consumeAnIdentLikeToken(): IdentToken | URLToken | FunctionToken {
+        const startInputCodePointIndex = this.nextInputCodePointIndex;
+        const nameToken = this.consumeAName();
+        if (!nameToken) {
             return null;
         }
         if (this.text[this.nextInputCodePointIndex] === "(") {
             this.nextInputCodePointIndex++;
-            if (name.text.toLowerCase() === "url") {
+            if (nameToken.name.toLowerCase() === "url") {
                 return this.consumeAURLToken();
             }
-            return { type: TokenType.functionToken, text: name.text } as FunctionToken;
+            return { type: TokenType.functionToken, source: this.text.substring(startInputCodePointIndex, this.nextInputCodePointIndex), name: nameToken.name } as FunctionToken;
         }
-        return name;
+        return nameToken;
     }
 
     /**
@@ -470,6 +464,7 @@ export class Tokenizer {
      * https://www.w3.org/TR/css-syntax-3/#consume-a-string-token
      */
     private consumeAStringToken(): StringToken {
+        const startInputCodePointIndex = this.nextInputCodePointIndex;
         const char = this.text[this.nextInputCodePointIndex];
         let result: RegExpExecArray;
 
@@ -490,17 +485,18 @@ export class Tokenizer {
             this.nextInputCodePointIndex = doubleQuoteStringRegEx.lastIndex;
         }
         const text = Tokenizer.escape(result[1]);
-        return { type: TokenType.string, text };
+        return { type: TokenType.string, source: this.text.substring(startInputCodePointIndex, this.nextInputCodePointIndex), text };
     }
 
     /**
      * 4.3.5. Consume a url token
      * https://www.w3.org/TR/css-syntax-3/#consume-a-url-token
      */
-    private consumeAURLToken(): InputToken {
+    private consumeAURLToken(): URLToken {
+        const startInputCodePointIndex = this.nextInputCodePointIndex - 4; // The "url(" has been consumed allready
         this.consumeAWhitespace();
         if (this.nextInputCodePointIndex >= this.text.length) {
-            return { type: TokenType.url, text: "" };
+            return { type: TokenType.url, source: this.text.substring(startInputCodePointIndex, this.nextInputCodePointIndex), url: "" };
         }
         const nextInputCodePoint = this.text[this.nextInputCodePointIndex];
         if (nextInputCodePoint === "\"" || nextInputCodePoint === "'") {
@@ -509,18 +505,18 @@ export class Tokenizer {
             this.consumeAWhitespace();
             if (this.text[this.nextInputCodePointIndex] === ")" || this.nextInputCodePointIndex >= this.text.length) {
                 this.nextInputCodePointIndex++;
-                return { type: TokenType.url, text: stringToken.text };
+                return { type: TokenType.url, source: this.text.substring(startInputCodePointIndex, this.nextInputCodePointIndex), url: stringToken.text };
             } else {
                 // TODO: Handle bad-url.
                 return null;
             }
         }
 
-        let text = "";
+        let url = "";
         while (this.nextInputCodePointIndex < this.text.length) {
             const char = this.text[this.nextInputCodePointIndex++];
             switch (char) {
-                case ")": return { type: TokenType.url, text };
+                case ")": return { type: TokenType.url, source: this.text.substring(startInputCodePointIndex, this.nextInputCodePointIndex), url };
                 case " ":
                 case "\t":
                 case "\n":
@@ -529,7 +525,7 @@ export class Tokenizer {
                     this.consumeAWhitespace();
                     if (this.text[this.nextInputCodePointIndex] === ")") {
                         this.nextInputCodePointIndex++;
-                        return { type: TokenType.url, text };
+                        return { type: TokenType.url, source: this.text.substring(startInputCodePointIndex, this.nextInputCodePointIndex), url };
                     } else {
                         // TODO: Bar url! Consume remnants.
                         return null;
@@ -543,10 +539,10 @@ export class Tokenizer {
                     throw new Error("Escaping not yet supported!");
                 default:
                     // TODO: Non-printable chars - error.
-                    text += char;
+                    url += char;
             }
         }
-        return { type: TokenType.url, text };
+        return { type: TokenType.url, source: this.text.substring(startInputCodePointIndex, this.nextInputCodePointIndex), url };
     }
 
     /**
@@ -554,6 +550,7 @@ export class Tokenizer {
      * https://www.w3.org/TR/css-syntax-3/#consume-a-unicode-range-token
      */
     private consumeAUnicodeRangeToken(): UnicodeRangeToken {
+        const startInputCodePointIndex = this.nextInputCodePointIndex - 2; // "U+"" has been consumed
         let hexStart = this.nextInputCodePointIndex;
         while (this.nextInputCodePointIndex - hexStart < 6 && isHex(this.text[this.nextInputCodePointIndex])) {
             this.nextInputCodePointIndex++;
@@ -568,7 +565,7 @@ export class Tokenizer {
             const str = this.text.substring(hexStart, wildcardEnd);
             const start = parseInt("0x" + str.replace(/\?/g, "0"), 16);
             const end = parseInt("0x" + str.replace(/\?/g, "F"), 16);
-            return { type: TokenType.unicodeRange, start, end };
+            return { type: TokenType.unicodeRange, source: this.text.substring(startInputCodePointIndex, this.nextInputCodePointIndex), start, end };
         } else {
             const startStr = this.text.substring(hexStart, wildcardEnd);
             const start = parseInt("0x" + startStr, 16);
@@ -581,10 +578,10 @@ export class Tokenizer {
                 hexEnd = this.nextInputCodePointIndex;
                 const endStr = this.text.substr(hexStart, hexEnd);
                 const end = parseInt("0x" + endStr, 16);
-                return { type: TokenType.unicodeRange, start, end };
+                return { type: TokenType.unicodeRange, source: this.text.substring(startInputCodePointIndex, this.nextInputCodePointIndex), start, end };
             }
 
-            return { type: TokenType.unicodeRange, start, end: start };
+            return { type: TokenType.unicodeRange, source: this.text.substring(startInputCodePointIndex, this.nextInputCodePointIndex), start, end: start };
         }
     }
 
@@ -593,21 +590,23 @@ export class Tokenizer {
      * https://www.w3.org/TR/css-syntax-3/#consume-a-name
      */
     private consumeAName(): IdentToken {
+        const startInputCodePointIndex = this.nextInputCodePointIndex;
         nameRegEx.lastIndex = this.nextInputCodePointIndex;
         const result = nameRegEx.exec(this.text);
         if (!result) {
             return null;
         }
         this.nextInputCodePointIndex = nameRegEx.lastIndex;
-        const text = Tokenizer.escape(result[0]);
-        return { type: TokenType.ident, text };
+        const name = Tokenizer.escape(result[0]);
+        return { type: TokenType.ident, source: this.text.substring(startInputCodePointIndex, this.nextInputCodePointIndex), name };
     }
 
     private consumeAtKeyword(): AtKeywordToken {
+        const startInputCodePointIndex = this.nextInputCodePointIndex;
         this.nextInputCodePointIndex++;
-        const name = this.consumeAName();
-        if (name) {
-            return { type: TokenType.atKeyword, text: name.text };
+        const nameToken = this.consumeAName();
+        if (nameToken) {
+            return { type: TokenType.atKeyword, source: this.text.substring(startInputCodePointIndex, this.nextInputCodePointIndex), name: nameToken.name };
         }
         this.nextInputCodePointIndex--;
         return null;
@@ -736,7 +735,7 @@ export class Parser extends Tokenizer {
     protected consumeAnAtRule(reconsumedInputToken: AtKeywordToken): AtRule {
         const atRule: AtRule = {
             type: "at-rule",
-            name: reconsumedInputToken.text, // TODO: What if it is not an @whatever?
+            name: reconsumedInputToken.name, // TODO: What if it is not an @whatever?
             prelude: [],
             block: undefined,
         };
@@ -845,7 +844,7 @@ export class Parser extends Tokenizer {
      */
     protected consumeADeclaration(reconsumedInputToken: IdentToken): Decl {
         const start = this.debug && this.start();
-        const property = reconsumedInputToken.text;
+        const property = reconsumedInputToken.name;
         let inputToken: InputToken;
         do {
             inputToken = this.consumeAToken();
@@ -882,7 +881,7 @@ export class Parser extends Tokenizer {
                 return this.consumeASimpleBlock(reconsumedInputToken);
         }
         if (typeof reconsumedInputToken === "object" && reconsumedInputToken.type === TokenType.functionToken) {
-            return this.consumeAFunction((reconsumedInputToken as FunctionToken).text);
+            return this.consumeAFunction((reconsumedInputToken as FunctionToken).name);
         }
         return reconsumedInputToken;
     }
