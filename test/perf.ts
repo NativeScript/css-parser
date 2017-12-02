@@ -60,6 +60,8 @@ const shadyDuration = trapDuration(() => {
 });
 const nativescriptParseDuration = trapDuration(() => {
     const cssparser = new nativescriptCss.Parser();
+    // Shaved from 6.2 to 5.5 msecs.
+    cssparser.debug = false;
     // TODO: Replace with parseAStylesheet when ready
     const stylesheet = cssparser.parseACSSStylesheet(themeCoreLightIos);
 });

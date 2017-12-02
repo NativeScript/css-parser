@@ -9,6 +9,7 @@
     "prepare": "tsc && tslint --project .",
     "tslint-fix": "tslint --fix --project .",
     "tslint": "tslint --project .",
+    "perf": "tsc && node test/perf.js",
     "inspect": "tsc && echo 'Open in chrome: chrome://inspect/#devices' && node --inspect --debug-brk test/prof.js"
   },
   "repository": {

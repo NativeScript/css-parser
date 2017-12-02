@@ -24,13 +24,13 @@ export interface StyleRule {
     type: "rule";
     selectors: string[];
     declarations: Array<Decl | AtRule>;
-    position: Source;
+    position?: Source;
 }
 export interface Decl {
     type: "declaration";
     property: string;
     value: string;
-    position: Source;
+    position?: Source;
 }
 export interface Source {
     start: Position;
@@ -46,7 +46,7 @@ const singleQuoteStringRegEx = /'((?:[^\n\r\f\\']|\\(?:\$|\n|[0-9a-fA-F]{1,6}\s?
 const doubleQuoteStringRegEx = /"((?:[^\n\r\f\\"]|\\(?:\$|\n|[0-9a-fA-F]{1,6}\s?|"))*)(?:"|$)/gym; // Besides $n, parse escape
 const commentRegEx = /(\/\*(?:[^\*]|\*[^\/])*\*\/)/gym;
 const numberRegEx = /[\+\-]?(?:\d+\.\d+|\d+|\.\d+)(?:[eE][\+\-]?\d+)?/gym;
-const nameRegEx = /-?(?:(?:[a-zA-Z_]|[^\x00-\x7F]|\\(?:\$|\n|[0-9a-fA-F]{1,6}\s?))(?:[a-zA-Z_0-9\-]*|\\(?:\$|\n|[0-9a-fA-F]{1,6}\s?))*)/gym;
+const nameRegEx = /-?(?:(?:[a-zA-Z_]|[^\x00-\x7F]|\\(?:\$|\n|[0-9a-fA-F]{1,6}\s?))(?:(?:[a-zA-Z_0-9\-]|[^\x00-\x7F])*|\\(?:\$|\n|[0-9a-fA-F]{1,6}\s?))*)/gym;
 const nonQuoteURLRegEx = /(:?[^\)\s\t\n\r\f\'\"\(]|\\(?:\$|\n|[0-9a-fA-F]{1,6}\s?))*/gym; // TODO: non-printable code points omitted
 
 type SimpleTokens = "(" | ")" | "{" | "}" | "[" | "]" | ":" | ";" | "," | " " | "^=" | "|=" | "$=" | "*=" | "~=" | "<!--" | "-->";
@@ -231,6 +231,9 @@ function isHex(char: string): boolean {
 export class Tokenizer {
 
     protected static escape(text: string): string {
+        if (text.indexOf("\\") === -1) {
+            return text;
+        }
         return text.replace(Tokenizer.stringEscapeRegex, (_, utf8, char, nl) => {
             if (utf8) {
                 const code = "0x" + utf8;
@@ -638,6 +641,10 @@ const enum ParseState {
  * https://www.w3.org/TR/css-syntax-3/#parsing
  */
 export class Parser extends Tokenizer {
+    /**
+     * Adds line and column infomration about declarations.
+     */
+    public debug: boolean = true;
 
     protected parsingCSS: boolean;
     protected topLevelFlag: boolean;
@@ -837,7 +844,7 @@ export class Parser extends Tokenizer {
      * https://www.w3.org/TR/css-syntax-3/#consume-a-declaration
      */
     protected consumeADeclaration(reconsumedInputToken: IdentToken): Decl {
-        const start = this.start();
+        const start = this.debug && this.start();
         const property = reconsumedInputToken.text;
         let inputToken: InputToken;
         do {
@@ -853,10 +860,14 @@ export class Parser extends Tokenizer {
         }
         value = value.trim();
 
-        const end = this.start();
+        const end = this.debug && this.start();
         // TODO: If the last non-whitespace tokens are delim "!" and ident "important",
         // delete them and set the declaration's "important" flag.
-        return { type: "declaration", property, value: value as any, position: { start, end } };
+        if (this.debug) {
+            return { type: "declaration", property, value: value as any, position: { start, end } };
+        } else {
+            return { type: "declaration", property, value: value as any };
+        }
     }
 
     /**
@@ -953,7 +964,7 @@ export class Parser extends Tokenizer {
      * https://www.w3.org/TR/css-syntax-3/#style-rules
      */
     protected consumeAStyleRule(reconsumedInputToken: InputToken): Rule {
-        const start = this.start();
+        const start = this.debug && this.start();
         const selectors: string[] = [];
         let selector = "";
         let inputToken: InputToken = reconsumedInputToken;
@@ -965,8 +976,12 @@ export class Parser extends Tokenizer {
                 }
                 this.parseState = ParseState.ListOfDeclarations;
                 const declarations = this.consumeAListOfDeclarations();
-                const end = this.end();
-                return { type: "rule", selectors, declarations, position: { start, end } };
+                const end = this.debug && this.end();
+                if (this.debug) {
+                    return { type: "rule", selectors, declarations, position: { start, end } };
+                } else {
+                    return { type: "rule", selectors, declarations };
+                }
             } else if (typeof inputToken === "object" && inputToken.type === TokenType.simpleBlock) {
                 const simpleBlock: SimpleBlock = inputToken as SimpleBlock;
                 if (simpleBlock.associatedToken === "{") {
