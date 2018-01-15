@@ -7,13 +7,25 @@ export interface Stylesheet {
         parsingErrors: string[];
     };
 }
-export type Rule = QualifiedRule | AtRule | StyleRule;
+export type AtRule = ImportAtRule | AtRuleToken;
+export type Rule = QualifiedRule | StyleRule | AtRule;
 
-export interface AtRule {
+/**
+ * An at-rule generated when no specific parsing can be found for an at-rule.
+ * The CSS level 3 spec describes how to parse at-rules in general when more specific rules
+ * for e. g. @import, @keyframes etc. are part of separate specs and added as extensions to the CSS parser.
+ */
+export interface AtRuleToken {
     type: "at-rule";
     name: string;
     prelude: InputToken[];
     block: SimpleBlock;
+    position?: Source;
+}
+export interface ImportAtRule {
+    type: "import",
+    import: string,
+    position?: Source;
 }
 export interface QualifiedRule {
     type: "qualified-rule";
@@ -635,6 +647,36 @@ const enum ParseState {
     Declaration = 2,
 }
 
+export class AtRuleParser {
+    public static identity = new AtRuleParser();
+    keyword: string;
+    fromAtRule(rule: AtRuleToken): AtRule {
+        return rule;
+    }
+}
+
+/**
+ * https://drafts.csswg.org/css-cascade-3/#at-ruledef-import
+ * Minimal @import parser to cover rework @import rules parser.
+ */
+export class ImportParser extends AtRuleParser {
+    fromAtRule(rule: AtRuleToken): ImportAtRule {
+        // TODO: Handle blocks, media queries, etc.
+        const type = "import";
+        const imp = rule.prelude.map(toString).join("").trim();
+        const position = rule.position;
+        return position ? { type, import: imp, position } : { type, import: imp };
+    }
+}
+ImportParser.prototype.keyword = "import";
+
+/**
+ * https://www.w3.org/TR/css-animations-1/#keyframes
+ */
+export class KeyframesParser extends AtRuleParser {
+}
+KeyframesParser.prototype.keyword = "keyframes";
+
 /**
  * 5. Parsing
  * https://www.w3.org/TR/css-syntax-3/#parsing
@@ -648,6 +690,12 @@ export class Parser extends Tokenizer {
     protected parsingCSS: boolean;
     protected topLevelFlag: boolean;
     protected parseState: ParseState;
+
+    private atRuleParsers: { [keyword: string]: AtRuleParser } = {};
+
+    public addAtRuleParser(atRuleParser: AtRuleParser) {
+        this.atRuleParsers[atRuleParser.keyword] = atRuleParser;
+    }
 
     /**
      * 5.3.1. Parse a stylesheet
@@ -713,8 +761,7 @@ export class Parser extends Tokenizer {
                     continue;
             }
             if (typeof inputToken === "object" && inputToken.type === TokenType.atKeyword) {
-                // TODO: Better typechecking...
-                const atRule = this.consumeAnAtRule(inputToken as AtKeywordToken);
+                const atRule = this.consumeAnAtRule(inputToken);
                 if (atRule) {
                     rules.push(atRule);
                 }
@@ -733,29 +780,35 @@ export class Parser extends Tokenizer {
      * https://www.w3.org/TR/css-syntax-3/#consume-an-at-rule
      */
     protected consumeAnAtRule(reconsumedInputToken: AtKeywordToken): AtRule {
-        const atRule: AtRule = {
+        const start = this.debug && this.start();
+        const atRuleParser = this.atRuleParsers[reconsumedInputToken.name] || AtRuleParser.identity;
+        const atRule: AtRuleToken = {
             type: "at-rule",
-            name: reconsumedInputToken.name, // TODO: What if it is not an @whatever?
+            name: reconsumedInputToken.name,
             prelude: [],
             block: undefined,
         };
         let inputToken: InputToken;
         while (inputToken = this.consumeAToken()) {
             if (inputToken === ";") {
-                return atRule;
+                break;
             } else if (inputToken === "{") {
                 atRule.block = this.consumeASimpleBlock(inputToken);
-                return atRule;
+                break;
             } else if (typeof inputToken === "object" && inputToken.type === TokenType.simpleBlock && inputToken.associatedToken === "{") {
                 atRule.block = inputToken as SimpleBlock;
-                return atRule;
+                break;
             }
             const component = this.consumeAComponentValue(inputToken);
             if (component) {
                 atRule.prelude.push(component);
             }
         }
-        return atRule;
+        if (this.debug) {
+            const end = this.end();
+            atRule.position = { start, end };
+        }
+        return atRuleParser.fromAtRule(atRule);
     }
 
     /**

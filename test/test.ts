@@ -5,7 +5,7 @@ import * as fs from "fs";
 
 import { assert } from "chai";
 import * as cssParse from "css-parse";
-import { Parser, TokenType } from "../src/index";
+import { Parser, TokenType, ImportParser, KeyframesParser } from "../src/index";
 
 describe("css", () => {
     let parser: Parser;
@@ -312,6 +312,10 @@ describe("css", () => {
                             name: "import",
                             prelude: [" ", { type: TokenType.url, source: `url(~/app.css)`, url: "~/app.css" }],
                             block: undefined,
+                            position: {
+                                start: { line: 1, column: 1 },
+                                end: { column: 24, line: 1 }
+                            }
                         },
                         {
                             type: "qualified-rule",
@@ -459,6 +463,10 @@ describe("css", () => {
                                     " ",
                                 ],
                             },
+                            position: {
+                                start: { line: 2, column: 17 },
+                                end: { line: 5, column: 18 }
+                            }
                         },
                         {
                             type: "qualified-rule",
@@ -492,33 +500,64 @@ describe("css", () => {
             });
         });
     });
-    describe("css stylesheet as rework", () => {
-        function compare(css: string): void {
-            const nativescript = parser.parseACSSStylesheet(css);
-            // console.log(JSON.stringify(nativescript));
-            // Strip type info and undefined properties.
-            const rework = JSON.parse(JSON.stringify(cssParse(css)));
-            assert.deepEqual(nativescript, rework);
-        }
-        it("div{color:red}p{color:blue}", () => {
-            compare("div{color:red}p{color:blue}");
-        });
-        it("Button, Label { background: red; }", () => {
-            compare("Button, Label {\n  background: red;\n}\n");
-        });
-        it("Label { color: argb(1, 255, 0, 0); }", () => {
-            compare("Label { color: argb(1, 255, 0, 0); }");
-        });
-        it("Div { width: 50%; height: 30px; border-width: 2; }", () => {
-            compare("Div { width: 50%; height: 30px; border-width: 2; }");
-        });
-        it("Div {color:#212121;opacity:.9}", () => {
-            compare("Div {color:#212121;opacity:.9}");
-        });
-        it("core.light.css", () => {
-            const css = fs.readFileSync("./test/assets/core.light.css").toString();
-            compare(css);
-        });
-        // TODO: Complete implementation of string-ly values for declarations and do extensive testing...
+});
+
+describe("css as rework", () => {
+    let parser: Parser;
+    before("create parser", () => {
+        parser = new Parser();
+        parser.addAtRuleParser(new ImportParser());
+        parser.addAtRuleParser(new KeyframesParser());
+    });
+    after("dispose parser", () => parser = null);
+
+    function compare(css: string): void {
+        const nativescript = parser.parseACSSStylesheet(css);
+        // console.log(JSON.stringify(nativescript));
+        // Strip type info and undefined properties.
+        const rework = JSON.parse(JSON.stringify(cssParse(css)));
+        // console.log("REWORK AST:\n" + JSON.stringify(rework, null, "  "));
+        // console.log("{N} AST:\n" + JSON.stringify(nativescript, null, "  "));
+        assert.deepEqual(nativescript, rework);
+    }
+    it("div{color:red}p{color:blue}", () => {
+        compare("div{color:red}p{color:blue}");
+    });
+    it("Button, Label { background: red; }", () => {
+        compare("Button, Label {\n  background: red;\n}\n");
+    });
+    it("Label { color: argb(1, 255, 0, 0); }", () => {
+        compare("Label { color: argb(1, 255, 0, 0); }");
+    });
+    it("Div { width: 50%; height: 30px; border-width: 2; }", () => {
+        compare("Div { width: 50%; height: 30px; border-width: 2; }");
+    });
+    it("Div {color:#212121;opacity:.9}", () => {
+        compare("Div {color:#212121;opacity:.9}");
+    });
+    it("core.light.css", () => {
+        const css = fs.readFileSync("./test/assets/core.light.css").toString();
+        compare(css);
+    });
+    it.skip("simple keyframe", () => {
+        const css = `
+            @keyframes example {
+                0% { transform: scale(1, 1); }
+                100% { transform: scale(1, 0); }
+            }
+            div {
+                animation: example 5s linear 2s infinite alternate;
+            }
+        `;
+        compare(css);
+    });
+    it("simple import", () => {
+        const css = `
+            @import url("mycomponent.css");
+            @import url("mycomponent-print.css") print;
+            div { background: red; }
+        `;
+        compare(css);
     });
 });
+
