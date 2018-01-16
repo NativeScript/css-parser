@@ -688,11 +688,6 @@ const enum ParseState {
  * https://www.w3.org/TR/css-syntax-3/#parsing
  */
 export class Parser extends Tokenizer {
-    /**
-     * Adds line and column infomration about declarations.
-     */
-    public debug: boolean = true;
-
     protected topLevelFlag: boolean;
 
     /**
@@ -794,7 +789,6 @@ export class Parser extends Tokenizer {
      * https://www.w3.org/TR/css-syntax-3/#consume-an-at-rule
      */
     protected consumeAnAtRule(reconsumedInputToken: AtKeywordToken): AtRule {
-        const start = this.debug && this.start();
         const atRule: AtRule = {
             type: "at-rule",
             name: reconsumedInputToken.name,
@@ -816,10 +810,6 @@ export class Parser extends Tokenizer {
             if (component) {
                 atRule.prelude.push(component);
             }
-        }
-        if (this.debug) {
-            const end = this.end();
-            atRule.position = { start, end };
         }
         return atRule;
     }
@@ -1071,7 +1061,6 @@ importParser.keyword = "import";
  */
 export const keyframesParser: AtRuleParser = function(this: CSSParser, atRule: AtRule): KeyframesAtRule {
     const name = atRule.prelude.map(toString).join("").trim();
-
     const keyframes: Keyframe[] = [];
     this.with(atRule.block.values, () => this.consumeAListOfRules())
         .forEach((rule) => {
@@ -1081,7 +1070,6 @@ export const keyframesParser: AtRuleParser = function(this: CSSParser, atRule: A
                 keyframes.push({ type: "keyframe", values, declarations });
             }
         });
-
     return { type: "keyframes", name, keyframes };
 };
 keyframesParser.keyword = "keyframes";

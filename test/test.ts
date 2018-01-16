@@ -312,10 +312,6 @@ describe("css", () => {
                             name: "import",
                             prelude: [" ", { type: TokenType.url, source: `url(~/app.css)`, url: "~/app.css" }],
                             block: undefined,
-                            position: {
-                                start: { line: 1, column: 1 },
-                                end: { column: 24, line: 1 },
-                            },
                         },
                         {
                             type: "qualified-rule",
@@ -463,10 +459,6 @@ describe("css", () => {
                                     " ",
                                 ],
                             },
-                            position: {
-                                start: { line: 2, column: 17 },
-                                end: { line: 5, column: 18 },
-                            },
                         },
                         {
                             type: "qualified-rule",
@@ -506,7 +498,6 @@ describe("css as rework", () => {
     let parser: CSSParser;
     before("create parser", () => {
         parser = new CSSParser();
-        parser.debug = false;
         parser.addAtRuleParser(importParser);
         parser.addAtRuleParser(keyframesParser);
     });

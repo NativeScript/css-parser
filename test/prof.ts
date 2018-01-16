@@ -7,6 +7,7 @@ const themeCoreLightIos = fs.readFileSync(`${__dirname}/assets/core.light.css`).
 
 profiler.startProfiling("parse", true);
 const cssparser = new nativescriptCss.CSSParser();
-cssparser.debug = false;
+cssparser.addAtRuleParser(nativescriptCss.importParser);
+cssparser.addAtRuleParser(nativescriptCss.keyframesParser);
 cssparser.parseACSSStylesheet(themeCoreLightIos);
 profiler.stopProfiling("parse");
