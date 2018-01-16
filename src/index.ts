@@ -1,5 +1,3 @@
-import { Declaration } from "shady-css-parser/dist/shady-css/common";
-
 export interface Stylesheet {
     type: "stylesheet";
     stylesheet: {
@@ -7,15 +5,24 @@ export interface Stylesheet {
         parsingErrors: string[];
     };
 }
-export type AtRule = ImportAtRule | AtRuleToken;
-export type Rule = QualifiedRule | StyleRule | AtRule;
+export type Rule = QualifiedRule | AtRule;
+
+export interface CSSStylesheet {
+    type: "stylesheet";
+    stylesheet: {
+        rules: CSSRules[];
+        parsingErrors: string[];
+    };
+}
+export type CSSRules = StyleRule | StyleAtRule;
+export type StyleAtRule = ImportAtRule | KeyframesAtRule;
 
 /**
  * An at-rule generated when no specific parsing can be found for an at-rule.
  * The CSS level 3 spec describes how to parse at-rules in general when more specific rules
  * for e. g. @import, @keyframes etc. are part of separate specs and added as extensions to the CSS parser.
  */
-export interface AtRuleToken {
+export interface AtRule {
     type: "at-rule";
     name: string;
     prelude: InputToken[];
@@ -27,15 +34,26 @@ export interface ImportAtRule {
     import: string;
     position?: Source;
 }
+export interface KeyframesAtRule {
+    type: "keyframes";
+    name: string;
+    keyframes: Keyframe[];
+}
+interface Keyframe {
+    type: "keyframe";
+    values: string[];
+    declarations: Decl[];
+}
 export interface QualifiedRule {
     type: "qualified-rule";
     prelude: InputToken[];
     block: SimpleBlock;
+    position?: Source;
 }
 export interface StyleRule {
     type: "rule";
     selectors: string[];
-    declarations: Array<Decl | AtRule>;
+    declarations: Array<Decl | AtRule>; // TODO: Probably should be a StyleAtRule?
     position?: Source;
 }
 export interface Decl {
@@ -81,6 +99,24 @@ export function toString(token: InputToken): string {
         case TokenType.simpleBlock: return token.associatedToken + token.values.map(toString).join("") + endianTokenMap[token.associatedToken];
     }
     return token.source;
+}
+function arrayToString(tokens: InputToken[]): string {
+    return tokens.map(toString).join("").trim();
+}
+function split(arr: InputToken[], sep: SimpleTokens): InputToken[][] {
+    const result: InputToken[][] = [];
+    for (let start = 0, end = 0; end <= arr.length; end++) {
+        if (arr[end] === sep || end === arr.length) {
+            if (start !== end) {
+                result.push(arr.slice(start, end));
+                start = end + 1;
+            }
+        }
+    }
+    return result;
+}
+function isDeclaration(rule: Decl | AtRule): rule is Decl {
+    return rule.type === "declaration";
 }
 
 export const enum TokenType {
@@ -647,63 +683,6 @@ const enum ParseState {
     Declaration = 2,
 }
 
-interface AtRuleParser {
-    (this: Parser, reconsumedInputToken: AtKeywordToken): AtRule;
-    keyword?: string;
-}
-
-const defaultAtRuleParser: AtRuleParser = function(this: Parser, reconsumedInputToken: AtKeywordToken): AtRuleToken {
-    const start = this.debug && this.start();
-    const atRule: AtRuleToken = {
-        type: "at-rule",
-        name: reconsumedInputToken.name,
-        prelude: [],
-        block: undefined,
-    };
-    let inputToken: InputToken;
-    while (inputToken = this.consumeAToken()) {
-        if (inputToken === ";") {
-            break;
-        } else if (inputToken === "{") {
-            atRule.block = this.consumeASimpleBlock(inputToken);
-            break;
-        } else if (typeof inputToken === "object" && inputToken.type === TokenType.simpleBlock && inputToken.associatedToken === "{") {
-            atRule.block = inputToken as SimpleBlock;
-            break;
-        }
-        const component = this.consumeAComponentValue(inputToken);
-        if (component) {
-            atRule.prelude.push(component);
-        }
-    }
-    if (this.debug) {
-        const end = this.end();
-        atRule.position = { start, end };
-    }
-    return atRule;
-};
-
-/**
- * https://drafts.csswg.org/css-cascade-3/#at-ruledef-import
- * Minimal @import parser to cover rework @import rules parser.
- */
-export const importParser: AtRuleParser = function(this: Parser, reconsumedInputToken: AtKeywordToken): ImportAtRule {
-    const rule = defaultAtRuleParser.call(this, reconsumedInputToken);
-    const type = "import";
-    const imp = rule.prelude.map(toString).join("").trim();
-    const position = rule.position;
-    return position ? { type, import: imp, position } : { type, import: imp };
-};
-importParser.keyword = "import";
-
-/**
- * https://www.w3.org/TR/css-animations-1/#keyframes
- */
-const keyframesParser: AtRuleParser = function(this: Parser, reconsumedInputToken: AtKeywordToken): AtRuleToken {
-    return defaultAtRuleParser.call(this, reconsumedInputToken);
-};
-keyframesParser.keyword = "keyframes";
-
 /**
  * 5. Parsing
  * https://www.w3.org/TR/css-syntax-3/#parsing
@@ -714,40 +693,7 @@ export class Parser extends Tokenizer {
      */
     public debug: boolean = true;
 
-    protected parsingCSS: boolean;
     protected topLevelFlag: boolean;
-    protected parseState: ParseState;
-
-    private atRuleParsers: { [keyword: string]: AtRuleParser } = {};
-
-    public addAtRuleParser(atRuleParser: AtRuleParser) {
-        this.atRuleParsers[atRuleParser.keyword] = atRuleParser;
-    }
-
-    public consumeAToken(): InputToken {
-        if (this.parseState === ParseState.Default) {
-            return super.consumeAToken();
-        }
-        let inputToken: InputToken;
-        while (inputToken = super.consumeAToken()) {
-            if (inputToken === "}") {
-                this.parseState = ParseState.Default;
-                return undefined;
-            }
-            inputToken = this.consumeAComponentValue(inputToken);
-            if (inputToken) {
-                break;
-            }
-        }
-        if (this.parseState === ParseState.ListOfDeclarations) {
-            return inputToken;
-        }
-        if (inputToken === ";") {
-            this.parseState = ParseState.ListOfDeclarations;
-            return undefined;
-        }
-        return inputToken;
-    }
 
     /**
      * 5.3.1. Parse a stylesheet
@@ -755,27 +701,7 @@ export class Parser extends Tokenizer {
      */
     public parseAStylesheet(text: string): Stylesheet {
         this.reset(text);
-        this.parsingCSS = false;
         this.topLevelFlag = true;
-        const stylesheet: Stylesheet = {
-            type: "stylesheet",
-            stylesheet: {
-                rules: this.consumeAListOfRules(),
-                parsingErrors: [],
-            },
-        };
-        return stylesheet;
-    }
-
-    /**
-     * 8. CSS stylesheets
-     * https://www.w3.org/TR/css-syntax-3/#css-stylesheets
-     */
-    public parseACSSStylesheet(text: string): Stylesheet {
-        this.reset(text);
-        this.parsingCSS = true;
-        this.topLevelFlag = true;
-        this.parseState = ParseState.Default;
         const stylesheet: Stylesheet = {
             type: "stylesheet",
             stylesheet: {
@@ -827,16 +753,11 @@ export class Parser extends Tokenizer {
         return block;
     }
 
-    protected reset(text: string): void {
-        super.reset(text);
-        this.parseState = ParseState.Default;
-    }
-
     /**
      * 5.4.1. Consume a list of rules
      * https://www.w3.org/TR/css-syntax-3/#consume-a-list-of-rules
      */
-    protected consumeAListOfRules(): Rule[] {
+    public consumeAListOfRules(): Rule[] {
         const rules: Rule[] = [];
         let inputToken: InputToken;
         while (inputToken = this.consumeAToken()) {
@@ -873,8 +794,34 @@ export class Parser extends Tokenizer {
      * https://www.w3.org/TR/css-syntax-3/#consume-an-at-rule
      */
     protected consumeAnAtRule(reconsumedInputToken: AtKeywordToken): AtRule {
-        const atRuleParser = this.atRuleParsers[reconsumedInputToken.name] || defaultAtRuleParser;
-        return atRuleParser.call(this, reconsumedInputToken);
+        const start = this.debug && this.start();
+        const atRule: AtRule = {
+            type: "at-rule",
+            name: reconsumedInputToken.name,
+            prelude: [],
+            block: undefined,
+        };
+        let inputToken: InputToken;
+        while (inputToken = this.consumeAToken()) {
+            if (inputToken === ";") {
+                break;
+            } else if (inputToken === "{") {
+                atRule.block = this.consumeASimpleBlock(inputToken);
+                break;
+            } else if (typeof inputToken === "object" && inputToken.type === TokenType.simpleBlock && inputToken.associatedToken === "{") {
+                atRule.block = inputToken as SimpleBlock;
+                break;
+            }
+            const component = this.consumeAComponentValue(inputToken);
+            if (component) {
+                atRule.prelude.push(component);
+            }
+        }
+        if (this.debug) {
+            const end = this.end();
+            atRule.position = { start, end };
+        }
+        return atRule;
     }
 
     /**
@@ -882,11 +829,6 @@ export class Parser extends Tokenizer {
      * https://www.w3.org/TR/css-syntax-3/#consume-a-qualified-rule
      */
     protected consumeAQualifiedRule(reconsumedInputToken: InputToken): Rule {
-        // See 8: https://www.w3.org/TR/css-syntax-3/#css-stylesheets
-        if (this.treatQualifiedRulesAsStyleRules()) {
-            return this.consumeAStyleRule(reconsumedInputToken);
-        }
-
         const qualifiedRule: QualifiedRule = {
             type: "qualified-rule",
             prelude: [],
@@ -915,80 +857,6 @@ export class Parser extends Tokenizer {
     }
 
     /**
-     * 5.4.4. Consume a list of declarations
-     * https://www.w3.org/TR/css-syntax-3/#consume-a-list-of-declarations
-     */
-    protected consumeAListOfDeclarations(): Array<Decl | AtRule> {
-        const declarations: Array<Decl | AtRule> = [];
-        let inputToken: InputToken;
-        // NOTE: We may need to treat the "}" as EOF here...
-        while (inputToken = this.consumeAToken()) {
-            if (this.parseState === ParseState.Default) { break; }
-            if (typeof inputToken === "string") {
-                if (inputToken === " " || inputToken === ";") {
-                    // Do nothing
-                    continue;
-                }
-            } else if (typeof inputToken === "object") {
-                if (inputToken.type === TokenType.atKeyword) {
-                    declarations.push(this.consumeAnAtRule(inputToken));
-                    continue;
-                }
-                if (inputToken.type === TokenType.ident) {
-                    // While the current input token is anything other than a <semicolon-token> or <EOF-token>,
-                    // append it to the temporary list and consume the next input token.
-                    // Consume a declaration from the temporary list.
-                    this.parseState = ParseState.Declaration;
-                    const declaration = this.consumeADeclaration(inputToken as IdentToken);
-                    if (declaration) { declarations.push(declaration); }
-                    if (this.parseState as ParseState === ParseState.Default) { break; }
-                    continue;
-                }
-            }
-
-            // TODO: Log parse error!
-            while ((inputToken = this.consumeAComponentValue(this.consumeAToken())) && inputToken && inputToken !== ";") {
-                // Error recovery!
-            }
-            if (!inputToken) {
-                break;
-            }
-        }
-        return declarations;
-    }
-
-    /**
-     * 5.4.5. Consume a declaration
-     * https://www.w3.org/TR/css-syntax-3/#consume-a-declaration
-     */
-    protected consumeADeclaration(reconsumedInputToken: IdentToken): Decl {
-        const start = this.debug && this.start();
-        const property = reconsumedInputToken.name;
-        let inputToken: InputToken;
-        do {
-            inputToken = this.consumeAToken();
-        } while (inputToken === " ");
-        if (inputToken !== ":") {
-            return null; // TODO: Parse error!
-        }
-
-        let value = "";
-        while (inputToken = this.consumeAToken()) {
-            value += toString(inputToken);
-        }
-        value = value.trim();
-
-        const end = this.debug && this.start();
-        // TODO: If the last non-whitespace tokens are delim "!" and ident "important",
-        // delete them and set the declaration's "important" flag.
-        if (this.debug) {
-            return { type: "declaration", property, value: value as any, position: { start, end } };
-        } else {
-            return { type: "declaration", property, value: value as any };
-        }
-    }
-
-    /**
      * 5.4.8. Consume a function
      * https://www.w3.org/TR/css-syntax-3/#consume-a-function
      */
@@ -1006,55 +874,214 @@ export class Parser extends Tokenizer {
         }
         return functionToken;
     }
+}
 
-    protected treatQualifiedRulesAsStyleRules(): boolean {
-        return this.parsingCSS && this.topLevelFlag;
+interface AtRuleParser {
+    (this: CSSParser, atRule: AtRule): StyleAtRule;
+    keyword?: string;
+}
+
+export class CSSParser extends Parser {
+    private atRuleParsers: { [keyword: string]: AtRuleParser } = {};
+    public addAtRuleParser(atRuleParser: AtRuleParser) {
+        this.atRuleParsers[atRuleParser.keyword] = atRuleParser;
+    }
+
+    /**
+     * Replace the current input token stream with the provided array and execute the callback.
+     * This is used when the spec sounds like:
+     * "Create a temporary list, fill it, with the tomporary list consume-a-something".
+     */
+    public with<T>(inputTokens: InputToken[], action: () => T): T {
+        const stackedConsumeAToken = this.consumeAToken;
+        try {
+            let i = 0;
+            this.consumeAToken = () => inputTokens[i++];
+            this.start = this.end = () => { throw new Error("Source location when working 'with' sub input streams is not supported."); };
+            return action();
+        } finally {
+            this.consumeAToken = stackedConsumeAToken;
+            this.start = super.start;
+            this.end = super.end;
+        }
+    }
+
+    /**
+     * 8. CSS stylesheets
+     * https://www.w3.org/TR/css-syntax-3/#css-stylesheets
+     */
+    public parseACSSStylesheet(text: string): CSSStylesheet {
+        const stylesheet = this.parseAStylesheet(text);
+        const parsingErrors = stylesheet.stylesheet.parsingErrors;
+
+        // parse-a-stylesheet, apply ast transformations to make it look as CSS
+        const rules: CSSRules[] = [];
+        stylesheet.stylesheet.rules.forEach((rule) => {
+            if (rule.type === "qualified-rule") {
+                // Interpret as StyleRule
+                const styleRule = this.interpretAsStyleRule(rule);
+                if (styleRule) {
+                    rules.push(styleRule);
+                }
+            } else if (rule.type === "at-rule") {
+                // Recognize at-rule
+                const atRuleParser = this.atRuleParsers[rule.name];
+                if (atRuleParser) {
+                    const styleAtRule = atRuleParser.call(this, rule);
+                    if (styleAtRule) {
+                        rules.push(styleAtRule);
+                    }
+                }
+            } else {
+                // Discard!
+            }
+        });
+        return { type: "stylesheet", stylesheet: { rules, parsingErrors } };
+    }
+
+    /**
+     * 5.4.4. Consume a list of declarations
+     * https://www.w3.org/TR/css-syntax-3/#consume-a-list-of-declarations
+     */
+    public consumeAListOfDeclarations(): Array<Decl | AtRule> {
+        const declarations: Array<Decl | AtRule> = [];
+        let inputToken: InputToken;
+        while (inputToken = this.consumeAToken()) {
+            if (typeof inputToken === "string") {
+                if (inputToken === " " || inputToken === ";") {
+                    continue;
+                }
+            } else {
+                if (inputToken.type === TokenType.atKeyword) {
+                    const atRule = this.consumeAnAtRule(inputToken);
+                    declarations.push(atRule);
+                    continue;
+                } else if (inputToken.type === TokenType.ident) {
+                    const list: InputToken[] = [inputToken];
+                    while ((inputToken = this.consumeAToken()) && inputToken !== ";") {
+                        list.push(inputToken);
+                    }
+                    const declaration = this.with(list, () => this.consumeADeclaration());
+
+                    if (declaration) {
+                        declarations.push(declaration);
+                    }
+                    continue;
+                }
+            }
+            // TODO: Log parse error!
+            while ((inputToken = this.consumeAComponentValue(inputToken)) && inputToken !== ";") {
+                inputToken = this.consumeAToken();
+            }
+        }
+        return declarations;
+    }
+
+    /**
+     * 5.4.5. Consume a declaration
+     * https://www.w3.org/TR/css-syntax-3/#consume-a-declaration
+     *
+     * Unlike the spec this instead of reconsumed token, accepts an InputToken stream,
+     * in the spec this is only used within "Consume a list of declarations",
+     * and when it is used it is used as quoted: "Consume a declaration from the temporary list."
+     */
+    protected consumeADeclaration(): Decl {
+        const property = (this.consumeAToken() as IdentToken).name;
+        let inputToken: InputToken;
+        while ((inputToken = this.consumeAToken()) && inputToken === " ") {
+            // Intentionally empty
+        }
+        if (inputToken !== ":") {
+            // TODO: Parse error.
+            return;
+        }
+        let valueInputTokens: InputToken[] = [];
+        while (inputToken = this.consumeAToken()) {
+            valueInputTokens.push(inputToken);
+        }
+
+        // If the last two non-<whitespace-token>s in the declaration’s value are a <delim-token> with the value "!"
+        // followed by an <ident-token> with a value that is an ASCII case-insensitive match for "important",
+        // remove them from the declaration’s value and set the declaration’s important flag to true.
+        let isImportant = false;
+        let l = valueInputTokens.length - 1;
+        while (l >= 0 && valueInputTokens[l] === " ") { --l; }
+        const lastNonWhitespace = valueInputTokens[l];
+        if (typeof lastNonWhitespace === "object" && lastNonWhitespace.type === TokenType.ident && lastNonWhitespace.name === "important") {
+            --l;
+            while (l >= 0 && valueInputTokens[l] === " ") { --l; }
+            const oneBeforeLastNonWhitespace = valueInputTokens[l];
+            if (typeof oneBeforeLastNonWhitespace === "object" && oneBeforeLastNonWhitespace.type === TokenType.delim && oneBeforeLastNonWhitespace.source === "!") {
+                isImportant = true;
+                valueInputTokens = valueInputTokens.slice(0, l);
+            }
+        }
+        const value = valueInputTokens.map(toString).join("").trim();
+
+        return { type: "declaration", property, value };
     }
 
     /**
      * 8.1. Style rules
      * https://www.w3.org/TR/css-syntax-3/#style-rules
      */
-    protected consumeAStyleRule(reconsumedInputToken: InputToken): Rule {
-        const start = this.debug && this.start();
+    protected interpretAsStyleRule(qualifiedRule: QualifiedRule): StyleRule {
         const selectors: string[] = [];
-        let selector = "";
-        let inputToken: InputToken = reconsumedInputToken;
-        do {
-            if (inputToken === "{") {
+        let selector: string = "";
+        qualifiedRule.prelude.forEach((token) => {
+            if (token === ",") {
                 selector = selector.trim();
                 if (selector) {
                     selectors.push(selector);
                 }
-                this.parseState = ParseState.ListOfDeclarations;
-                const declarations = this.consumeAListOfDeclarations();
-                const end = this.debug && this.end();
-                if (this.debug) {
-                    return { type: "rule", selectors, declarations, position: { start, end } };
-                } else {
-                    return { type: "rule", selectors, declarations };
-                }
-            } else if (typeof inputToken === "object" && inputToken.type === TokenType.simpleBlock) {
-                const simpleBlock: SimpleBlock = inputToken as SimpleBlock;
-                if (simpleBlock.associatedToken === "{") {
-                    // TODO:
-                    throw new Error("A simple block was found where just a { token was expected!");
-                }
+                selector = "";
+            } else {
+                selector += toString(token);
             }
-            const componentValue = this.consumeAComponentValue(inputToken);
-            if (componentValue) {
-                if (componentValue === ",") {
-                    selector = selector.trim();
-                    if (selector) {
-                        selectors.push(selector);
-                    }
-                    selector = "";
-                } else {
-                    selector += toString(componentValue);
-                }
-            }
-        } while (inputToken = this.consumeAToken());
-        // TODO: This is a parse error, log parse errors!
-        return null;
+        });
+        selector = selector.trim();
+        if (selector) {
+            selectors.push(selector);
+        }
+
+        const declarations = this.with(qualifiedRule.block.values, () => this.consumeAListOfDeclarations());
+
+        const position = qualifiedRule.position;
+        return position ?
+            { type: "rule", selectors, declarations, position } :
+            { type: "rule", selectors, declarations };
     }
 }
+
+/**
+ * https://drafts.csswg.org/css-cascade-3/#at-ruledef-import
+ * Minimal @import parser to cover rework @import rules parser.
+ * The url have to be further parsed! Mistreats media queries!
+ */
+export const importParser: AtRuleParser = function(this: CSSParser, atRule: AtRule): ImportAtRule {
+    const type = "import";
+    const imp = atRule.prelude.map(toString).join("").trim();
+    const position = atRule.position;
+    return position ? { type, import: imp, position } : { type, import: imp };
+};
+importParser.keyword = "import";
+
+/**
+ * https://www.w3.org/TR/css-animations-1/#keyframes
+ */
+export const keyframesParser: AtRuleParser = function(this: CSSParser, atRule: AtRule): KeyframesAtRule {
+    const name = atRule.prelude.map(toString).join("").trim();
+
+    const keyframes: Keyframe[] = [];
+    this.with(atRule.block.values, () => this.consumeAListOfRules())
+        .forEach((rule) => {
+            if (rule.type === "qualified-rule") {
+                const values: string[] = split(rule.prelude, ",").map(arrayToString);
+                const declarations = this.with(rule.block.values, () => this.consumeAListOfDeclarations()).filter(isDeclaration);
+                keyframes.push({ type: "keyframe", values, declarations });
+            }
+        });
+
+    return { type: "keyframes", name, keyframes };
+};
+keyframesParser.keyword = "keyframes";

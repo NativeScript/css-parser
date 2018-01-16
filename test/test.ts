@@ -5,7 +5,7 @@ import * as fs from "fs";
 
 import { assert } from "chai";
 import * as cssParse from "css-parse";
-import { importParser, Parser, TokenType } from "../src/index";
+import { CSSParser, importParser, keyframesParser, Parser, TokenType } from "../src/index";
 
 describe("css", () => {
     let parser: Parser;
@@ -503,18 +503,20 @@ describe("css", () => {
 });
 
 describe("css as rework", () => {
-    let parser: Parser;
+    let parser: CSSParser;
     before("create parser", () => {
-        parser = new Parser();
+        parser = new CSSParser();
+        parser.debug = false;
         parser.addAtRuleParser(importParser);
+        parser.addAtRuleParser(keyframesParser);
     });
     after("dispose parser", () => parser = null);
 
     function compare(css: string): void {
         const nativescript = parser.parseACSSStylesheet(css);
         // console.log(JSON.stringify(nativescript));
-        // Strip type info and undefined properties.
-        const rework = JSON.parse(JSON.stringify(cssParse(css)));
+        // Strip type info, undefined properties, positions.
+        const rework = JSON.parse(JSON.stringify(cssParse(css), (key, value) => key === "position" ? undefined : value));
         // console.log("REWORK AST:\n" + JSON.stringify(rework, null, "  "));
         // console.log("{N} AST:\n" + JSON.stringify(nativescript, null, "  "));
         assert.deepEqual(nativescript, rework);
@@ -538,7 +540,7 @@ describe("css as rework", () => {
         const css = fs.readFileSync("./test/assets/core.light.css").toString();
         compare(css);
     });
-    it.skip("simple keyframe", () => {
+    it("simple keyframe", () => {
         const css = `
             @keyframes example {
                 0% { transform: scale(1, 1); }
