@@ -5,7 +5,7 @@ import * as fs from "fs";
 
 import { assert } from "chai";
 import * as cssParse from "css-parse";
-import { Parser, TokenType, ImportParser, KeyframesParser } from "../src/index";
+import { importParser, Parser, TokenType } from "../src/index";
 
 describe("css", () => {
     let parser: Parser;
@@ -314,8 +314,8 @@ describe("css", () => {
                             block: undefined,
                             position: {
                                 start: { line: 1, column: 1 },
-                                end: { column: 24, line: 1 }
-                            }
+                                end: { column: 24, line: 1 },
+                            },
                         },
                         {
                             type: "qualified-rule",
@@ -465,8 +465,8 @@ describe("css", () => {
                             },
                             position: {
                                 start: { line: 2, column: 17 },
-                                end: { line: 5, column: 18 }
-                            }
+                                end: { line: 5, column: 18 },
+                            },
                         },
                         {
                             type: "qualified-rule",
@@ -506,8 +506,7 @@ describe("css as rework", () => {
     let parser: Parser;
     before("create parser", () => {
         parser = new Parser();
-        parser.addAtRuleParser(new ImportParser());
-        parser.addAtRuleParser(new KeyframesParser());
+        parser.addAtRuleParser(importParser);
     });
     after("dispose parser", () => parser = null);
 
@@ -560,4 +559,3 @@ describe("css as rework", () => {
         compare(css);
     });
 });
-

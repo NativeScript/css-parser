@@ -23,8 +23,8 @@ export interface AtRuleToken {
     position?: Source;
 }
 export interface ImportAtRule {
-    type: "import",
-    import: string,
+    type: "import";
+    import: string;
     position?: Source;
 }
 export interface QualifiedRule {
@@ -269,20 +269,11 @@ export class Tokenizer {
         return tokens;
     }
 
-    protected reset(text: string) {
-        this.text = text;
-        this.nextInputCodePointIndex = 0;
-
-        this.lineStartIndex = 0;
-        this.lineEndIndex = -1;
-        this.line = 1;
-    }
-
-    protected start(): Position {
+    public start(): Position {
         return this.readNextLine(this.prevInputCodePointIndex);
     }
 
-    protected end(): Position {
+    public end(): Position {
         return this.readNextLine(this.nextInputCodePointIndex);
     }
 
@@ -290,7 +281,7 @@ export class Tokenizer {
      * 4.3.1. Consume a token
      * https://www.w3.org/TR/css-syntax-3/#consume-a-token
      */
-    protected consumeAToken(): InputToken {
+    public consumeAToken(): InputToken {
         this.prevInputCodePointIndex = this.nextInputCodePointIndex;
         const char = this.text[this.nextInputCodePointIndex];
         switch (char) {
@@ -358,6 +349,15 @@ export class Tokenizer {
             case undefined: return undefined;
             default: return this.consumeAnIdentLikeToken() || this.consumeADelimToken();
         }
+    }
+
+    protected reset(text: string) {
+        this.text = text;
+        this.nextInputCodePointIndex = 0;
+
+        this.lineStartIndex = 0;
+        this.lineEndIndex = -1;
+        this.line = 1;
     }
 
     private readNextLine(index: number): Position {
@@ -647,35 +647,62 @@ const enum ParseState {
     Declaration = 2,
 }
 
-export class AtRuleParser {
-    public static identity = new AtRuleParser();
-    keyword: string;
-    fromAtRule(rule: AtRuleToken): AtRule {
-        return rule;
-    }
+interface AtRuleParser {
+    (this: Parser, reconsumedInputToken: AtKeywordToken): AtRule;
+    keyword?: string;
 }
+
+const defaultAtRuleParser: AtRuleParser = function(this: Parser, reconsumedInputToken: AtKeywordToken): AtRuleToken {
+    const start = this.debug && this.start();
+    const atRule: AtRuleToken = {
+        type: "at-rule",
+        name: reconsumedInputToken.name,
+        prelude: [],
+        block: undefined,
+    };
+    let inputToken: InputToken;
+    while (inputToken = this.consumeAToken()) {
+        if (inputToken === ";") {
+            break;
+        } else if (inputToken === "{") {
+            atRule.block = this.consumeASimpleBlock(inputToken);
+            break;
+        } else if (typeof inputToken === "object" && inputToken.type === TokenType.simpleBlock && inputToken.associatedToken === "{") {
+            atRule.block = inputToken as SimpleBlock;
+            break;
+        }
+        const component = this.consumeAComponentValue(inputToken);
+        if (component) {
+            atRule.prelude.push(component);
+        }
+    }
+    if (this.debug) {
+        const end = this.end();
+        atRule.position = { start, end };
+    }
+    return atRule;
+};
 
 /**
  * https://drafts.csswg.org/css-cascade-3/#at-ruledef-import
  * Minimal @import parser to cover rework @import rules parser.
  */
-export class ImportParser extends AtRuleParser {
-    fromAtRule(rule: AtRuleToken): ImportAtRule {
-        // TODO: Handle blocks, media queries, etc.
-        const type = "import";
-        const imp = rule.prelude.map(toString).join("").trim();
-        const position = rule.position;
-        return position ? { type, import: imp, position } : { type, import: imp };
-    }
-}
-ImportParser.prototype.keyword = "import";
+export const importParser: AtRuleParser = function(this: Parser, reconsumedInputToken: AtKeywordToken): ImportAtRule {
+    const rule = defaultAtRuleParser.call(this, reconsumedInputToken);
+    const type = "import";
+    const imp = rule.prelude.map(toString).join("").trim();
+    const position = rule.position;
+    return position ? { type, import: imp, position } : { type, import: imp };
+};
+importParser.keyword = "import";
 
 /**
  * https://www.w3.org/TR/css-animations-1/#keyframes
  */
-export class KeyframesParser extends AtRuleParser {
-}
-KeyframesParser.prototype.keyword = "keyframes";
+const keyframesParser: AtRuleParser = function(this: Parser, reconsumedInputToken: AtKeywordToken): AtRuleToken {
+    return defaultAtRuleParser.call(this, reconsumedInputToken);
+};
+keyframesParser.keyword = "keyframes";
 
 /**
  * 5. Parsing
@@ -695,6 +722,31 @@ export class Parser extends Tokenizer {
 
     public addAtRuleParser(atRuleParser: AtRuleParser) {
         this.atRuleParsers[atRuleParser.keyword] = atRuleParser;
+    }
+
+    public consumeAToken(): InputToken {
+        if (this.parseState === ParseState.Default) {
+            return super.consumeAToken();
+        }
+        let inputToken: InputToken;
+        while (inputToken = super.consumeAToken()) {
+            if (inputToken === "}") {
+                this.parseState = ParseState.Default;
+                return undefined;
+            }
+            inputToken = this.consumeAComponentValue(inputToken);
+            if (inputToken) {
+                break;
+            }
+        }
+        if (this.parseState === ParseState.ListOfDeclarations) {
+            return inputToken;
+        }
+        if (inputToken === ";") {
+            this.parseState = ParseState.ListOfDeclarations;
+            return undefined;
+        }
+        return inputToken;
     }
 
     /**
@@ -732,6 +784,47 @@ export class Parser extends Tokenizer {
             },
         };
         return stylesheet;
+    }
+
+    /**
+     * 5.4.6. Consume a component value
+     * https://www.w3.org/TR/css-syntax-3/#consume-a-component-value
+     */
+    public consumeAComponentValue(reconsumedInputToken: InputToken): InputToken {
+        switch (reconsumedInputToken) {
+            case "{":
+            case "[":
+            case "(":
+                return this.consumeASimpleBlock(reconsumedInputToken);
+        }
+        if (typeof reconsumedInputToken === "object" && reconsumedInputToken.type === TokenType.functionToken) {
+            return this.consumeAFunction((reconsumedInputToken as FunctionToken).name);
+        }
+        return reconsumedInputToken;
+    }
+
+    /**
+     * 5.4.7. Consume a simple block
+     * https://www.w3.org/TR/css-syntax-3/#consume-a-simple-block
+     */
+    public consumeASimpleBlock(associatedToken: "[" | "{" | "("): SimpleBlock {
+        const endianToken = endianTokenMap[associatedToken];
+        const block: SimpleBlock = {
+            type: TokenType.simpleBlock,
+            associatedToken,
+            values: [],
+        };
+        let inputToken: InputToken;
+        while (inputToken = this.consumeAToken()) {
+            if (inputToken === endianToken) {
+                return block;
+            }
+            const value = this.consumeAComponentValue(inputToken);
+            if (value) {
+                block.values.push(value);
+            }
+        }
+        return block;
     }
 
     protected reset(text: string): void {
@@ -780,35 +873,8 @@ export class Parser extends Tokenizer {
      * https://www.w3.org/TR/css-syntax-3/#consume-an-at-rule
      */
     protected consumeAnAtRule(reconsumedInputToken: AtKeywordToken): AtRule {
-        const start = this.debug && this.start();
-        const atRuleParser = this.atRuleParsers[reconsumedInputToken.name] || AtRuleParser.identity;
-        const atRule: AtRuleToken = {
-            type: "at-rule",
-            name: reconsumedInputToken.name,
-            prelude: [],
-            block: undefined,
-        };
-        let inputToken: InputToken;
-        while (inputToken = this.consumeAToken()) {
-            if (inputToken === ";") {
-                break;
-            } else if (inputToken === "{") {
-                atRule.block = this.consumeASimpleBlock(inputToken);
-                break;
-            } else if (typeof inputToken === "object" && inputToken.type === TokenType.simpleBlock && inputToken.associatedToken === "{") {
-                atRule.block = inputToken as SimpleBlock;
-                break;
-            }
-            const component = this.consumeAComponentValue(inputToken);
-            if (component) {
-                atRule.prelude.push(component);
-            }
-        }
-        if (this.debug) {
-            const end = this.end();
-            atRule.position = { start, end };
-        }
-        return atRuleParser.fromAtRule(atRule);
+        const atRuleParser = this.atRuleParsers[reconsumedInputToken.name] || defaultAtRuleParser;
+        return atRuleParser.call(this, reconsumedInputToken);
     }
 
     /**
@@ -923,47 +989,6 @@ export class Parser extends Tokenizer {
     }
 
     /**
-     * 5.4.6. Consume a component value
-     * https://www.w3.org/TR/css-syntax-3/#consume-a-component-value
-     */
-    protected consumeAComponentValue(reconsumedInputToken: InputToken): InputToken {
-        switch (reconsumedInputToken) {
-            case "{":
-            case "[":
-            case "(":
-                return this.consumeASimpleBlock(reconsumedInputToken);
-        }
-        if (typeof reconsumedInputToken === "object" && reconsumedInputToken.type === TokenType.functionToken) {
-            return this.consumeAFunction((reconsumedInputToken as FunctionToken).name);
-        }
-        return reconsumedInputToken;
-    }
-
-    /**
-     * 5.4.7. Consume a simple block
-     * https://www.w3.org/TR/css-syntax-3/#consume-a-simple-block
-     */
-    protected consumeASimpleBlock(associatedToken: "[" | "{" | "("): SimpleBlock {
-        const endianToken = endianTokenMap[associatedToken];
-        const block: SimpleBlock = {
-            type: TokenType.simpleBlock,
-            associatedToken,
-            values: [],
-        };
-        let inputToken: InputToken;
-        while (inputToken = this.consumeAToken()) {
-            if (inputToken === endianToken) {
-                return block;
-            }
-            const value = this.consumeAComponentValue(inputToken);
-            if (value) {
-                block.values.push(value);
-            }
-        }
-        return block;
-    }
-
-    /**
      * 5.4.8. Consume a function
      * https://www.w3.org/TR/css-syntax-3/#consume-a-function
      */
@@ -984,31 +1009,6 @@ export class Parser extends Tokenizer {
 
     protected treatQualifiedRulesAsStyleRules(): boolean {
         return this.parsingCSS && this.topLevelFlag;
-    }
-
-    protected consumeAToken(): InputToken {
-        if (this.parseState === ParseState.Default) {
-            return super.consumeAToken();
-        }
-        let inputToken: InputToken;
-        while (inputToken = super.consumeAToken()) {
-            if (inputToken === "}") {
-                this.parseState = ParseState.Default;
-                return undefined;
-            }
-            inputToken = this.consumeAComponentValue(inputToken);
-            if (inputToken) {
-                break;
-            }
-        }
-        if (this.parseState === ParseState.ListOfDeclarations) {
-            return inputToken;
-        }
-        if (inputToken === ";") {
-            this.parseState = ParseState.ListOfDeclarations;
-            return undefined;
-        }
-        return inputToken;
     }
 
     /**
