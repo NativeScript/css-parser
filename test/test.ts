@@ -515,8 +515,8 @@ describe("css as rework", () => {
         // console.log(JSON.stringify(nativescript));
         // Strip type info and undefined properties.
         const rework = JSON.parse(JSON.stringify(cssParse(css)));
-        // console.log("REWORK AST:\n" + JSON.stringify(rework, null, "  "));
-        // console.log("{N} AST:\n" + JSON.stringify(nativescript, null, "  "));
+        console.log("REWORK AST:\n" + JSON.stringify(rework, null, "  "));
+        console.log("{N} AST:\n" + JSON.stringify(nativescript, null, "  "));
         assert.deepEqual(nativescript, rework);
     }
     it("div{color:red}p{color:blue}", () => {
@@ -538,11 +538,11 @@ describe("css as rework", () => {
         const css = fs.readFileSync("./test/assets/core.light.css").toString();
         compare(css);
     });
-    it.skip("simple keyframe", () => {
+    it.only("simple keyframe", () => {
         const css = `
             @keyframes example {
-                0% { transform: scale(1, 1); }
-                100% { transform: scale(1, 0); }
+                from, 66% { transform: scale(1, 1); }
+                33%, to { transform: scale(1, 0); }
             }
             div {
                 animation: example 5s linear 2s infinite alternate;

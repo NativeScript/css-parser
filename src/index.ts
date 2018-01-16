@@ -7,7 +7,7 @@ export interface Stylesheet {
         parsingErrors: string[];
     };
 }
-export type AtRule = ImportAtRule | AtRuleToken;
+export type AtRule = ImportAtRule | KeyframesAtRule | AtRuleToken;
 export type Rule = QualifiedRule | StyleRule | AtRule;
 
 /**
@@ -20,6 +20,17 @@ export interface AtRuleToken {
     name: string;
     prelude: InputToken[];
     block: SimpleBlock;
+    position?: Source;
+}
+export interface KeyframesAtRule {
+    type: "keyframes";
+    name: string;
+    keyframes: Keyframe[];
+}
+export interface Keyframe {
+    type: "keyframe";
+    values: string[];
+    declarations: Declaration[];
     position?: Source;
 }
 export interface ImportAtRule {
@@ -643,8 +654,13 @@ type TokenMap = (consumeAToken: () => InputToken) => () => InputToken;
 
 const enum ParseState {
     Default = 0,
-    ListOfDeclarations = 1,
-    Declaration = 2,
+    /**
+     * In this state the parser has read an opening "{" token, and is reading its content as list of rules.
+     * Used for: @keyframes <keyframes-name> { <rule-list> }
+     */
+    ListOfRules = 1,
+    ListOfDeclarations = 2,
+    Declaration = 3,
 }
 
 interface AtRuleParser {
@@ -699,8 +715,37 @@ importParser.keyword = "import";
 /**
  * https://www.w3.org/TR/css-animations-1/#keyframes
  */
-const keyframesParser: AtRuleParser = function(this: Parser, reconsumedInputToken: AtKeywordToken): AtRuleToken {
-    return defaultAtRuleParser.call(this, reconsumedInputToken);
+const keyframesParser: AtRuleParser = function(this: Parser, reconsumedInputToken: AtKeywordToken): KeyframesAtRule {
+    const start = this.debug && this.start();
+    const atRule: AtRuleToken = {
+        type: "at-rule",
+        name: reconsumedInputToken.name,
+        prelude: [],
+        block: undefined,
+    };
+    let inputToken: InputToken;
+    while (inputToken = this.consumeAToken()) {
+        if (inputToken === ";") {
+            break;
+        } else if (inputToken === "{") {
+            this.parseState = ParseState.ListOfRules;
+            // The only difference with AtRule is that this parses the block as list of rules.
+            atRule.block = this.consumeAListOfRules();
+            break;
+        } else if (typeof inputToken === "object" && inputToken.type === TokenType.simpleBlock && inputToken.associatedToken === "{") {
+            atRule.block = inputToken as SimpleBlock;
+            break;
+        }
+        const component = this.consumeAComponentValue(inputToken);
+        if (component) {
+            atRule.prelude.push(component);
+        }
+    }
+    if (this.debug) {
+        const end = this.end();
+        atRule.position = { start, end };
+    }
+    return atRule;
 };
 keyframesParser.keyword = "keyframes";
 
@@ -716,7 +761,7 @@ export class Parser extends Tokenizer {
 
     protected parsingCSS: boolean;
     protected topLevelFlag: boolean;
-    protected parseState: ParseState;
+    public parseState: ParseState;
 
     private atRuleParsers: { [keyword: string]: AtRuleParser } = {};
 
@@ -731,7 +776,11 @@ export class Parser extends Tokenizer {
         let inputToken: InputToken;
         while (inputToken = super.consumeAToken()) {
             if (inputToken === "}") {
-                this.parseState = ParseState.Default;
+                if (this.parseState === ParseState.ListOfDeclarations) {
+                    this.parseState = ParseState.ListOfRules;
+                } else if (this.parseState === ParseState.ListOfRules) {
+                    this.parseState = ParseState.Default;
+                }
                 return undefined;
             }
             inputToken = this.consumeAComponentValue(inputToken);
@@ -836,7 +885,7 @@ export class Parser extends Tokenizer {
      * 5.4.1. Consume a list of rules
      * https://www.w3.org/TR/css-syntax-3/#consume-a-list-of-rules
      */
-    protected consumeAListOfRules(): Rule[] {
+    public consumeAListOfRules(): Rule[] {
         const rules: Rule[] = [];
         let inputToken: InputToken;
         while (inputToken = this.consumeAToken()) {
